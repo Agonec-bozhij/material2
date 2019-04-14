@@ -1,7 +1,9 @@
-import {createPackageBuildTasks} from 'material2-build-tools';
+import {task} from 'gulp';
+import {createPackageBuildTasks, sequenceTask} from 'material2-build-tools';
 import {
-  cdkPackage,
+  allBuildPackages,
   cdkExperimentalPackage,
+  cdkPackage,
   examplesPackage,
   materialExperimentalPackage,
   materialPackage,
@@ -16,20 +18,19 @@ createPackageBuildTasks(examplesPackage, ['build-examples-module']);
 createPackageBuildTasks(momentAdapterPackage);
 
 import './tasks/aot';
-import './tasks/changelog';
+import './tasks/breaking-changes';
 import './tasks/ci';
 import './tasks/clean';
-import './tasks/coverage';
 import './tasks/default';
 import './tasks/development';
-import './tasks/docs';
-import './tasks/e2e';
 import './tasks/example-module';
 import './tasks/lint';
 import './tasks/material-release';
-import './tasks/payload';
-import './tasks/publish';
-import './tasks/screenshots';
 import './tasks/unit-test';
 import './tasks/universal';
-import './tasks/validate-release';
+
+/** Task that builds all available release packages. */
+task('build-release-packages', sequenceTask(
+  'clean',
+  allBuildPackages.map(buildPackage => `${buildPackage.name}:build-release`)
+));

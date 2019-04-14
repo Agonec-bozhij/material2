@@ -6,9 +6,17 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {Injectable, Inject, InjectionToken, Optional, SkipSelf} from '@angular/core';
 import {DOCUMENT} from '@angular/common';
+import {
+  Inject,
+  Injectable,
+  InjectionToken,
+  OnDestroy,
+  Optional,
+  SkipSelf,
+} from '@angular/core';
 import {addAriaReferencedId, getAriaReferenceIds, removeAriaReferencedId} from './aria-reference';
+
 
 /**
  * Interface used to register message elements and keep a count of how many registrations have
@@ -46,8 +54,8 @@ let messagesContainer: HTMLElement | null = null;
  * content.
  * @docs-private
  */
-@Injectable()
-export class AriaDescriber {
+@Injectable({providedIn: 'root'})
+export class AriaDescriber implements OnDestroy {
   private _document: Document;
 
   constructor(@Inject(DOCUMENT) _document: any) {
@@ -60,7 +68,7 @@ export class AriaDescriber {
    * message element.
    */
   describe(hostElement: Element, message: string) {
-    if (hostElement.nodeType !== this._document.ELEMENT_NODE || !message.trim()) {
+    if (!this._canBeDescribed(hostElement, message)) {
       return;
     }
 
@@ -75,7 +83,7 @@ export class AriaDescriber {
 
   /** Removes the host element's aria-describedby reference to the message element. */
   removeDescription(hostElement: Element, message: string) {
-    if (hostElement.nodeType !== this._document.ELEMENT_NODE || !message.trim()) {
+    if (!this._isElementNode(hostElement)) {
       return;
     }
 
@@ -119,7 +127,7 @@ export class AriaDescriber {
     messageElement.setAttribute('id', `${CDK_DESCRIBEDBY_ID_PREFIX}-${nextId++}`);
     messageElement.appendChild(this._document.createTextNode(message)!);
 
-    if (!messagesContainer) { this._createMessagesContainer(); }
+    this._createMessagesContainer();
     messagesContainer!.appendChild(messageElement);
 
     messageRegistry.set(message, {messageElement, referenceCount: 0});
@@ -137,11 +145,23 @@ export class AriaDescriber {
 
   /** Creates the global container for all aria-describedby messages. */
   private _createMessagesContainer() {
-    messagesContainer = this._document.createElement('div');
-    messagesContainer.setAttribute('id', MESSAGES_CONTAINER_ID);
-    messagesContainer.setAttribute('aria-hidden', 'true');
-    messagesContainer.style.display = 'none';
-    this._document.body.appendChild(messagesContainer);
+    if (!messagesContainer) {
+      const preExistingContainer = this._document.getElementById(MESSAGES_CONTAINER_ID);
+
+      // When going from the server to the client, we may end up in a situation where there's
+      // already a container on the page, but we don't have a reference to it. Clear the
+      // old container so we don't get duplicates. Doing this, instead of emptying the previous
+      // container, should be slightly faster.
+      if (preExistingContainer) {
+        preExistingContainer.parentNode!.removeChild(preExistingContainer);
+      }
+
+      messagesContainer = this._document.createElement('div');
+      messagesContainer.id = MESSAGES_CONTAINER_ID;
+      messagesContainer.setAttribute('aria-hidden', 'true');
+      messagesContainer.style.display = 'none';
+      this._document.body.appendChild(messagesContainer);
+    }
   }
 
   /** Deletes the global messages container. */
@@ -196,14 +216,33 @@ export class AriaDescriber {
     return !!messageId && referenceIds.indexOf(messageId) != -1;
   }
 
+  /** Determines whether a message can be described on a particular element. */
+  private _canBeDescribed(element: Element, message: string): boolean {
+    if (!this._isElementNode(element)) {
+      return false;
+    }
+
+    const trimmedMessage = message == null ? '' : `${message}`.trim();
+    const ariaLabel = element.getAttribute('aria-label');
+
+    // We shouldn't set descriptions if they're exactly the same as the `aria-label` of the element,
+    // because screen readers will end up reading out the same text twice in a row.
+    return trimmedMessage ? (!ariaLabel || ariaLabel.trim() !== trimmedMessage) : false;
+  }
+
+  /** Checks whether a node is an Element node. */
+  private _isElementNode(element: Node): element is Element {
+    return element.nodeType === this._document.ELEMENT_NODE;
+  }
 }
 
-/** @docs-private */
+
+/** @docs-private @deprecated @breaking-change 8.0.0 */
 export function ARIA_DESCRIBER_PROVIDER_FACTORY(parentDispatcher: AriaDescriber, _document: any) {
   return parentDispatcher || new AriaDescriber(_document);
 }
 
-/** @docs-private */
+/** @docs-private @deprecated @breaking-change 8.0.0 */
 export const ARIA_DESCRIBER_PROVIDER = {
   // If there is already an AriaDescriber available, use that. Otherwise, provide a new one.
   provide: AriaDescriber,

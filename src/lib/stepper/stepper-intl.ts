@@ -6,12 +6,12 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {Injectable} from '@angular/core';
-import {Subject} from 'rxjs/Subject';
+import {Injectable, Optional, SkipSelf} from '@angular/core';
+import {Subject} from 'rxjs';
 
 
 /** Stepper data that is required for internationalization. */
-@Injectable()
+@Injectable({providedIn: 'root'})
 export class MatStepperIntl {
   /**
    * Stream that emits whenever the labels here are changed. Use this to notify
@@ -22,3 +22,16 @@ export class MatStepperIntl {
   /** Label that is rendered below optional steps. */
   optionalLabel: string = 'Optional';
 }
+
+
+/** @docs-private */
+export function MAT_STEPPER_INTL_PROVIDER_FACTORY(parentIntl: MatStepperIntl) {
+  return parentIntl || new MatStepperIntl();
+}
+
+/** @docs-private */
+export const MAT_STEPPER_INTL_PROVIDER = {
+  provide: MatStepperIntl,
+  deps: [[new Optional(), new SkipSelf(), MatStepperIntl]],
+  useFactory: MAT_STEPPER_INTL_PROVIDER_FACTORY
+};

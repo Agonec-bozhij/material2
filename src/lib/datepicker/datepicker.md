@@ -51,6 +51,32 @@ year containing the `startAt` date.
 
 <!-- example(datepicker-start-view) -->
 
+#### Watching the views for changes on selected years and months
+
+When a year or a month is selected in `multi-year` and `year` views respectively, the `yearSelected`
+and `monthSelected` outputs emit a normalized date representing the chosen year or month. By
+"normalized" we mean that the dates representing years will have their month set to January and
+their day set to the 1st. Dates representing months will have their day set to the 1st of the
+month. For example, if `<mat-datepicker>` is configured to work with javascript native Date
+objects, the `yearSelected` will emit `new Date(2017, 0, 1)` if the user selects 2017 in
+`multi-year` view. Similarly, `monthSelected` will emit `new Date(2017, 1, 1)` if the user
+selects **February** in `year` view and the current date value of the connected `<input>` was
+set to something like `new Date(2017, MM, dd)` when the calendar was opened (the month and day are
+irrelevant in this case).
+
+Notice that the emitted value does not affect the current value in the connected `<input>`, which
+is only bound to the selection made in the `month` view. So if the end user closes the calendar
+after choosing a year in `multi-view` mode (by pressing the `ESC` key, for example), the selected
+year, emitted by `yearSelected` output, will not cause any change in the value of the date in the
+associated `<input>`.
+
+The following example uses `yearSelected` and `monthSelected` outputs to emulate a month and year
+picker (if you're not familiar with the usage of `MomentDateAdapter` and `MAT_DATE_FORMATS`
+you can [read more about them](#choosing-a-date-implementation-and-date-format-settings) below in
+this document to fully understand the example).
+
+<!-- example(datepicker-views-selection) -->
+
 ### Setting the selected date
 
 The type of values that the datepicker expects depends on the type of `DateAdapter` provided in your
@@ -73,6 +99,14 @@ As with other types of `<input>`, the datepicker works with `@angular/forms` dir
 `formGroup`, `formControl`, `ngModel`, etc.
 
 <!-- example(datepicker-value) -->
+
+### Changing the datepicker colors
+
+The datepicker popup will automatically inherit the color palette (`primary`, `accent`, or `warn`)
+from the `mat-form-field` it is attached to. If you would like to specify a different palette for
+the popup you can do so by setting the `color` property on `mat-datepicker`.
+
+<!-- example(datepicker-color) -->
 
 ### Date validation
 
@@ -212,6 +246,17 @@ export class MyComponent {
 
 <!-- example(datepicker-moment) -->
 
+By default the `MomentDateAdapter` will creates dates in your time zone specific locale. You can change the default behaviour to parse dates as UTC by providing the `MAT_MOMENT_DATE_ADAPTER_OPTIONS` and setting it to `useUtc: true`.
+
+```ts
+@NgModule({
+  imports: [MatDatepickerModule, MatMomentDateModule],
+  providers: [
+    { provide: MAT_MOMENT_DATE_ADAPTER_OPTIONS, useValue: { useUtc: true } }
+  ]
+})
+```
+
 It is also possible to create your own `DateAdapter` that works with any date format your app
 requires. This is accomplished by subclassing `DateAdapter` and providing your subclass as the
 `DateAdapter` implementation. You will also want to make sure that the `MAT_DATE_FORMATS` provided
@@ -253,6 +298,20 @@ export class MyApp {}
 
 <!-- example(datepicker-formats) -->
 
+#### Customizing the calendar header
+
+The header section of the calendar (the part containing the view switcher and previous and next
+buttons) can be replaced with a custom component if desired. This is accomplished using the
+`calendarHeaderComponent` property of `<mat-datepicker>`. It takes a component class and constructs
+an instance of the component to use as the header.
+
+In order to interact with the calendar in your custom header component, you can inject the parent
+`MatCalendar` in the constructor. To make sure your header stays in sync with the calendar,
+subscribe to the `stateChanges` observable of the calendar and mark your header component for change
+detection.
+
+<!-- example(datepicker-custom-header) -->
+
 #### Localizing labels and messages
 
 The various text strings used by the datepicker are provided through `MatDatepickerIntl`.
@@ -269,16 +328,25 @@ application root module.
 export class MyApp {}
 ```
 
+#### Highlighting specific dates
+If you want to apply one or more CSS classes to some dates in the calendar (e.g. to highlight a
+holiday), you can do so with the `dateClass` input. It accepts a function which will be called
+with each of the dates in the calendar and will apply any classes that are returned. The return
+value can be anything that is accepted by `ngClass`.
+
+<!-- example(datepicker-date-class) -->
+
 ### Accessibility
 
-The `MatDatepickerInput` directive adds `aria-haspopup` attribute to the native input element, and it
-triggers a calendar dialog with `role="dialog"`.
+The `MatDatepickerInput` and `MatDatepickerToggle` directives add the `aria-haspopup` attribute to
+the native input and toggle button elements respectively, and they trigger a calendar dialog with
+`role="dialog"`.
 
 `MatDatepickerIntl` includes strings that are used for `aria-label`s. The datepicker input
 should have a placeholder or be given a meaningful label via `aria-label`, `aria-labelledby` or
 `MatDatepickerIntl`.
 
-#### Keyboard shortcuts
+#### Keyboard interaction
 
 The datepicker supports the following keyboard shortcuts:
 

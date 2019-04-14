@@ -1,5 +1,6 @@
 @import '../core/theming/palette';
 @import '../core/theming/theming';
+@import '../core/style/elevation';
 @import '../core/typography/typography-utils';
 
 @mixin mat-expansion-panel-theme($theme) {
@@ -7,6 +8,7 @@
   $foreground: map-get($theme, foreground);
 
   .mat-expansion-panel {
+    @include _mat-theme-overridable-elevation(2, $theme);
     background: mat-color($background, card);
     color: mat-color($foreground, text);
   }
@@ -22,6 +24,15 @@
       &:hover {
         background: mat-color($background, hover);
       }
+    }
+  }
+
+  // Disable the hover on touch devices since it can appear like it is stuck. We can't use
+  // `@media (hover)` above, because the desktop support browser support isn't great.
+  @media (hover: none) {
+    .mat-expansion-panel:not(.mat-expanded):not([aria-disabled='true'])
+      .mat-expansion-panel-header:hover {
+      background: mat-color($background, card);
     }
   }
 

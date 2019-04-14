@@ -10,8 +10,7 @@ import {FocusKeyManager} from '@angular/cdk/a11y';
 import {Directionality} from '@angular/cdk/bidi';
 import {coerceBooleanProperty} from '@angular/cdk/coercion';
 import {SelectionModel} from '@angular/cdk/collections';
-import {BACKSPACE} from '@angular/cdk/keycodes';
-import {startWith} from 'rxjs/operators/startWith';
+import {BACKSPACE, END, HOME} from '@angular/cdk/keycodes';
 import {
   AfterContentInit,
   ChangeDetectionStrategy,
@@ -30,19 +29,19 @@ import {
   Self,
   ViewEncapsulation,
 } from '@angular/core';
+import {ControlValueAccessor, FormGroupDirective, NgControl, NgForm} from '@angular/forms';
 import {
-  ControlValueAccessor,
-  FormGroupDirective,
-  NgControl,
-  NgForm
-} from '@angular/forms';
-import {ErrorStateMatcher, mixinErrorState, CanUpdateErrorState} from '@angular/material/core';
+  CanUpdateErrorState,
+  CanUpdateErrorStateCtor,
+  ErrorStateMatcher,
+  mixinErrorState,
+} from '@angular/material/core';
 import {MatFormFieldControl} from '@angular/material/form-field';
-import {Observable} from 'rxjs/Observable';
-import {merge} from 'rxjs/observable/merge';
-import {Subscription} from 'rxjs/Subscription';
+import {merge, Observable, Subject, Subscription} from 'rxjs';
+import {startWith, takeUntil} from 'rxjs/operators';
 import {MatChip, MatChipEvent, MatChipSelectionChange} from './chip';
-import {MatChipInput} from './chip-input';
+import {MatChipTextControl} from './chip-text-control';
+
 
 // Boilerplate for applying mixins to MatChipList.
 /** @docs-private */
@@ -53,7 +52,8 @@ export class MatChipListBase {
               /** @docs-private */
               public ngControl: NgControl) {}
 }
-export const _MatChipListMixinBase = mixinErrorState(MatChipListBase);
+export const _MatChipListMixinBase: CanUpdateErrorStateCtor & typeof MatChipListBase =
+    mixinErrorState(MatChipListBase);
 
 
 // Increasing integer for generating unique ids for chip-list components.
@@ -70,7 +70,7 @@ export class MatChipListChange {
 
 
 /**
- * A material design chips component (named ChipList for it's similarity to the List component).
+ * A material design chips component (named ChipList for its similarity to the List component).
  */
 @Component({
   moduleId: module.id,
@@ -78,7 +78,7 @@ export class MatChipListChange {
   template: `<div class="mat-chip-list-wrapper"><ng-content></ng-content></div>`,
   exportAs: 'matChipList',
   host: {
-    '[attr.tabindex]': '_tabIndex',
+    '[attr.tabindex]': 'disabled ? null : _tabIndex',
     '[attr.aria-describedby]': '_ariaDescribedby || null',
     '[attr.aria-required]': 'required.toString()',
     '[attr.aria-disabled]': 'disabled.toString()',
@@ -92,12 +92,12 @@ export class MatChipListChange {
     'class': 'mat-chip-list',
     '(focus)': 'focus()',
     '(blur)': '_blur()',
-    '(keydown)': '_keydown($event)'
+    '(keydown)': '_keydown($event)',
+    '[id]': '_uid',
   },
   providers: [{provide: MatFormFieldControl, useExisting: MatChipList}],
   styleUrls: ['chips.css'],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class MatChipList extends _MatChipListMixinBase implements MatFormFieldControl<any>,
@@ -108,17 +108,15 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
    */
   readonly controlType: string = 'mat-chip-list';
 
-  /** When a chip is destroyed, we track the index so we can focus the appropriate next chip. */
-  protected _lastDestroyedIndex: number|null = null;
+  /**
+   * When a chip is destroyed, we store the index of the destroyed chip until the chips
+   * query list notifies about the update. This is necessary because we cannot determine an
+   * appropriate chip that should receive focus until the array of chips updated completely.
+   */
+  private _lastDestroyedChipIndex: number | null = null;
 
-  /** Track which chips we're listening to for focus/destruction. */
-  protected _chipSet: WeakMap<MatChip, boolean> = new WeakMap();
-
-  /** Subscription to tabbing out from the chip list. */
-  private _tabOutSubscription = Subscription.EMPTY;
-
-  /** Subscription to changes in the chip list. */
-  private _changeSubscription: Subscription;
+  /** Subject that emits when the component has been destroyed. */
+  private _destroyed = new Subject<void>();
 
   /** Subscription to focus changes in the chips. */
   private _chipFocusSubscription: Subscription | null;
@@ -133,10 +131,10 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
   private _chipRemoveSubscription: Subscription | null;
 
   /** The chip input to add more chips */
-  protected _chipInput: MatChipInput;
+  protected _chipInput: MatChipTextControl;
 
   /** Uid of the chip list */
-  protected _uid: string = `mat-chip-list-${nextUniqueId++}`;
+  _uid: string = `mat-chip-list-${nextUniqueId++}`;
 
   /** The aria-describedby attribute on the chip list for improved a11y. */
   _ariaDescribedby: string;
@@ -177,6 +175,7 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
   get multiple(): boolean { return this._multiple; }
   set multiple(value: boolean) {
     this._multiple = coerceBooleanProperty(value);
+    this._syncChipsState();
   }
   private _multiple: boolean = false;
 
@@ -212,13 +211,9 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
    * Implemented as part of MatFormFieldControl.
    * @docs-private
    */
-  @Input()
-  get id(): string { return this._id || this._uid; }
-  set id(value: string) {
-    this._id = value;
-    this.stateChanges.next();
+  get id(): string {
+    return this._chipInput ? this._chipInput.id : this._uid;
   }
-  protected _id: string;
 
   /**
    * Implemented as part of MatFormFieldControl.
@@ -248,8 +243,7 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
 
   /** Whether any chips or the matChipInput inside of this chip-list has focus. */
   get focused(): boolean {
-    return this.chips.some(chip => chip._hasFocus) ||
-      (this._chipInput && this._chipInput.focused);
+    return (this._chipInput && this._chipInput.focused) || this._hasFocusedChip();
   }
 
   /**
@@ -272,19 +266,28 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
    */
   @Input()
   get disabled(): boolean { return this.ngControl ? !!this.ngControl.disabled : this._disabled; }
-  set disabled(value: boolean) { this._disabled = coerceBooleanProperty(value); }
+  set disabled(value: boolean) {
+    this._disabled = coerceBooleanProperty(value);
+    this._syncChipsState();
+  }
   protected _disabled: boolean = false;
 
   /** Orientation of the chip list. */
   @Input('aria-orientation') ariaOrientation: 'horizontal' | 'vertical' = 'horizontal';
 
   /**
-   * Whether or not this chip is selectable. When a chip is not selectable,
-   * its selected state is always ignored.
+   * Whether or not this chip list is selectable. When a chip list is not selectable,
+   * the selected states for all the chips inside the chip list are always ignored.
    */
   @Input()
   get selectable(): boolean { return this._selectable; }
-  set selectable(value: boolean) { this._selectable = coerceBooleanProperty(value); }
+  set selectable(value: boolean) {
+    this._selectable = coerceBooleanProperty(value);
+
+    if (this.chips) {
+      this.chips.forEach(chip => chip.chipListSelectable = this._selectable);
+    }
+  }
   protected _selectable: boolean = true;
 
   @Input()
@@ -310,7 +313,7 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
 
   /** Combined stream of all of the child chips' remove change events. */
   get chipRemoveChanges(): Observable<MatChipEvent> {
-    return merge(...this.chips.map(chip => chip.destroy));
+    return merge(...this.chips.map(chip => chip.destroyed));
   }
 
   /** Event emitted when the selected chip list value has been changed by the user. */
@@ -327,7 +330,7 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
   /** The chip components contained within this chip list. */
   @ContentChildren(MatChip) chips: QueryList<MatChip>;
 
-  constructor(protected _elementRef: ElementRef,
+  constructor(protected _elementRef: ElementRef<HTMLElement>,
               private _changeDetectorRef: ChangeDetectorRef,
               @Optional() private _dir: Directionality,
               @Optional() _parentForm: NgForm,
@@ -347,15 +350,32 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
       .withVerticalOrientation()
       .withHorizontalOrientation(this._dir ? this._dir.value : 'ltr');
 
+    if (this._dir) {
+      this._dir.change
+        .pipe(takeUntil(this._destroyed))
+        .subscribe(dir => this._keyManager.withHorizontalOrientation(dir));
+    }
+
     // Prevents the chip list from capturing focus and redirecting
     // it back to the first chip when the user tabs out.
-    this._tabOutSubscription = this._keyManager.tabOut.subscribe(() => {
+    this._keyManager.tabOut.pipe(takeUntil(this._destroyed)).subscribe(() => {
       this._tabIndex = -1;
-      setTimeout(() => this._tabIndex = this._userTabIndex || 0);
+      setTimeout(() => {
+        this._tabIndex = this._userTabIndex || 0;
+        this._changeDetectorRef.markForCheck();
+      });
     });
 
     // When the list changes, re-subscribe
-    this._changeSubscription = this.chips.changes.pipe(startWith(null)).subscribe(() => {
+    this.chips.changes.pipe(startWith(null), takeUntil(this._destroyed)).subscribe(() => {
+      if (this.disabled) {
+        // Since this happens after the content has been
+        // checked, we need to defer it to the next tick.
+        Promise.resolve().then(() => {
+          this._syncChipsState();
+        });
+      }
+
       this._resetChips();
 
       // Reset chips selected/deselected status
@@ -366,6 +386,8 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
 
       // Check to see if we have a destroyed chip and need to refocus
       this._updateFocusForDestroyedChips();
+
+      this.stateChanges.next();
     });
   }
 
@@ -384,18 +406,16 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
   }
 
   ngOnDestroy() {
-    this._tabOutSubscription.unsubscribe();
-
-    if (this._changeSubscription) {
-      this._changeSubscription.unsubscribe();
-    }
-    this._dropSubscriptions();
+    this._destroyed.next();
+    this._destroyed.complete();
     this.stateChanges.complete();
+
+    this._dropSubscriptions();
   }
 
 
   /** Associates an HTML input element with this chip list. */
-  registerInput(inputElement: MatChipInput): void {
+  registerInput(inputElement: MatChipTextControl): void {
     this._chipInput = inputElement;
   }
 
@@ -425,7 +445,6 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
   // Implemented as part of ControlValueAccessor.
   setDisabledState(isDisabled: boolean): void {
     this.disabled = isDisabled;
-    this._elementRef.nativeElement.disabled = isDisabled;
     this.stateChanges.next();
   }
 
@@ -433,13 +452,21 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
    * Implemented as part of MatFormFieldControl.
    * @docs-private
    */
-  onContainerClick() { this.focus(); }
+  onContainerClick(event: MouseEvent) {
+    if (!this._originatesFromChip(event)) {
+      this.focus();
+    }
+  }
 
   /**
-   * Focuses the the first non-disabled chip in this chip list, or the associated input when there
+   * Focuses the first non-disabled chip in this chip list, or the associated input when there
    * are no eligible chips.
    */
   focus(): void {
+    if (this.disabled) {
+      return;
+    }
+
     // TODO: ARIA says this should focus the first `selected` chip if any are selected.
     // Focus on first element if there's no chipInput inside chip-list
     if (this._chipInput && this._chipInput.focused) {
@@ -471,7 +498,16 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
       this._keyManager.setLastItemActive();
       event.preventDefault();
     } else if (target && target.classList.contains('mat-chip')) {
-      this._keyManager.onKeydown(event);
+      if (event.keyCode === HOME) {
+        this._keyManager.setFirstItemActive();
+        event.preventDefault();
+      } else if (event.keyCode === END) {
+        this._keyManager.setLastItemActive();
+        event.preventDefault();
+      } else {
+        this._keyManager.onKeydown(event);
+      }
+
       this.stateChanges.next();
     }
   }
@@ -486,48 +522,16 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
   }
 
   /**
-   * Update key manager's active item when chip is deleted.
-   * If the deleted chip is the last chip in chip list, focus the new last chip.
-   * Otherwise focus the next chip in the list.
-   * Save `_lastDestroyedIndex` so we can set the correct focus.
-   */
-  protected _updateKeyManager(chip: MatChip) {
-    let chipIndex: number = this.chips.toArray().indexOf(chip);
-    if (this._isValidIndex(chipIndex)) {
-      if (chip._hasFocus) {
-        // Check whether the chip is not the last item
-        if (chipIndex < this.chips.length - 1) {
-          this._keyManager.setActiveItem(chipIndex);
-        } else if (chipIndex - 1 >= 0) {
-          this._keyManager.setActiveItem(chipIndex - 1);
-        }
-      }
-      if (this._keyManager.activeItemIndex === chipIndex) {
-        this._lastDestroyedIndex = chipIndex;
-      }
-    }
-  }
-
-  /**
-   * Checks to see if a focus chip was recently destroyed so that we can refocus the next closest
-   * one.
+   * If the amount of chips changed, we need to update the
+   * key manager state and focus the next closest chip.
    */
   protected _updateFocusForDestroyedChips() {
-    let chipsArray = this.chips;
-
-    if (this._lastDestroyedIndex != null && chipsArray.length > 0) {
-      // Check whether the destroyed chip was the last item
-      const newFocusIndex = Math.min(this._lastDestroyedIndex, chipsArray.length - 1);
-      this._keyManager.setActiveItem(newFocusIndex);
-      let focusChip = this._keyManager.activeItem;
-      // Focus the chip
-      if (focusChip) {
-        focusChip.focus();
-      }
+    if (this._lastDestroyedChipIndex != null && this.chips.length) {
+      const newChipIndex = Math.min(this._lastDestroyedChipIndex, this.chips.length - 1);
+      this._keyManager.setActiveItem(newChipIndex);
     }
 
-    // Reset our destroyed index
-    this._lastDestroyedIndex = null;
+    this._lastDestroyedChipIndex = null;
   }
 
   /**
@@ -562,14 +566,9 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
       // Shift focus to the active item. Note that we shouldn't do this in multiple
       // mode, because we don't know what chip the user interacted with last.
       if (correspondingChip) {
-        const correspondingChipIndex = this.chips.toArray().indexOf(correspondingChip);
-
         if (isUserInput) {
-          this._keyManager.setActiveItem(correspondingChipIndex);
-        } else {
-          this._keyManager.updateActiveItemIndex(correspondingChipIndex);
+          this._keyManager.setActiveItem(correspondingChip);
         }
-
       }
     }
   }
@@ -652,6 +651,10 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
 
   /** When blurred, mark the field as touched when focus moved outside the chip list. */
   _blur() {
+    if (!this._hasFocusedChip()) {
+      this._keyManager.setActiveItem(-1);
+    }
+
     if (!this.disabled) {
       if (this._chipInput) {
         // If there's a chip input, we should check whether the focus moved to chip input.
@@ -684,7 +687,6 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
     this._listenToChipsRemoved();
   }
 
-
   private _dropSubscriptions() {
     if (this._chipFocusSubscription) {
       this._chipFocusSubscription.unsubscribe();
@@ -699,6 +701,11 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
     if (this._chipSelectionSubscription) {
       this._chipSelectionSubscription.unsubscribe();
       this._chipSelectionSubscription = null;
+    }
+
+    if (this._chipRemoveSubscription) {
+      this._chipRemoveSubscription.unsubscribe();
+      this._chipRemoveSubscription = null;
     }
   }
 
@@ -743,7 +750,45 @@ export class MatChipList extends _MatChipListMixinBase implements MatFormFieldCo
 
   private _listenToChipsRemoved(): void {
     this._chipRemoveSubscription = this.chipRemoveChanges.subscribe(event => {
-      this._updateKeyManager(event.chip);
+      const chip = event.chip;
+      const chipIndex = this.chips.toArray().indexOf(event.chip);
+
+      // In case the chip that will be removed is currently focused, we temporarily store
+      // the index in order to be able to determine an appropriate sibling chip that will
+      // receive focus.
+      if (this._isValidIndex(chipIndex) && chip._hasFocus) {
+        this._lastDestroyedChipIndex = chipIndex;
+      }
     });
+  }
+
+  /** Checks whether an event comes from inside a chip element. */
+  private _originatesFromChip(event: Event): boolean {
+    let currentElement = event.target as HTMLElement | null;
+
+    while (currentElement && currentElement !== this._elementRef.nativeElement) {
+      if (currentElement.classList.contains('mat-chip')) {
+        return true;
+      }
+
+      currentElement = currentElement.parentElement;
+    }
+
+    return false;
+  }
+
+  /** Checks whether any of the chips is focused. */
+  private _hasFocusedChip() {
+    return this.chips.some(chip => chip._hasFocus);
+  }
+
+  /** Syncs the list's state with the individual chips. */
+  private _syncChipsState() {
+    if (this.chips) {
+      this.chips.forEach(chip => {
+        chip.disabled = this._disabled;
+        chip._chipListMultiple = this.multiple;
+      });
+    }
   }
 }

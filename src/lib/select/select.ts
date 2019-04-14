@@ -5,33 +5,25 @@
  * Use of this source code is governed by an MIT-style license that can be
  * found in the LICENSE file at https://angular.io/license
  */
-import {ActiveDescendantKeyManager} from '@angular/cdk/a11y';
+
+import {ActiveDescendantKeyManager, LiveAnnouncer} from '@angular/cdk/a11y';
 import {Directionality} from '@angular/cdk/bidi';
 import {coerceBooleanProperty} from '@angular/cdk/coercion';
 import {SelectionModel} from '@angular/cdk/collections';
 import {
+  A,
   DOWN_ARROW,
   END,
   ENTER,
   HOME,
-  SPACE,
-  UP_ARROW,
   LEFT_ARROW,
   RIGHT_ARROW,
+  SPACE,
+  UP_ARROW,
+  hasModifierKey,
 } from '@angular/cdk/keycodes';
-import {
-  CdkConnectedOverlay,
-  Overlay,
-  RepositionScrollStrategy,
-  ScrollStrategy,
-  ViewportRuler,
-} from '@angular/cdk/overlay';
-import {filter} from 'rxjs/operators/filter';
-import {take} from 'rxjs/operators/take';
-import {map} from 'rxjs/operators/map';
-import {switchMap} from 'rxjs/operators/switchMap';
-import {startWith} from 'rxjs/operators/startWith';
-import {takeUntil} from 'rxjs/operators/takeUntil';
+import {CdkConnectedOverlay, Overlay, ScrollStrategy} from '@angular/cdk/overlay';
+import {ViewportRuler} from '@angular/cdk/scrolling';
 import {
   AfterContentInit,
   Attribute,
@@ -60,32 +52,39 @@ import {
   ViewChild,
   ViewEncapsulation,
 } from '@angular/core';
+import {ControlValueAccessor, FormGroupDirective, NgControl, NgForm} from '@angular/forms';
 import {
-  ControlValueAccessor,
-  FormGroupDirective,
-  NgControl,
-  NgForm
-} from '@angular/forms';
-import {
+  _countGroupLabelsBeforeOption,
+  _getOptionScrollPosition,
   CanDisable,
-  ErrorStateMatcher,
+  CanDisableCtor,
+  CanDisableRipple,
+  CanDisableRippleCtor,
   CanUpdateErrorState,
-  mixinErrorState,
+  CanUpdateErrorStateCtor,
+  ErrorStateMatcher,
   HasTabIndex,
+  HasTabIndexCtor,
+  MAT_OPTION_PARENT_COMPONENT,
   MatOptgroup,
   MatOption,
   MatOptionSelectionChange,
   mixinDisabled,
-  mixinTabIndex,
-  MAT_OPTION_PARENT_COMPONENT,
   mixinDisableRipple,
-  CanDisableRipple,
+  mixinErrorState,
+  mixinTabIndex,
 } from '@angular/material/core';
 import {MatFormField, MatFormFieldControl} from '@angular/material/form-field';
-import {Observable} from 'rxjs/Observable';
-import {merge} from 'rxjs/observable/merge';
-import {Subject} from 'rxjs/Subject';
-import {defer} from 'rxjs/observable/defer';
+import {defer, merge, Observable, Subject} from 'rxjs';
+import {
+  distinctUntilChanged,
+  filter,
+  map,
+  startWith,
+  switchMap,
+  take,
+  takeUntil,
+} from 'rxjs/operators';
 import {matSelectAnimations} from './select-animations';
 import {
   getMatSelectDynamicMultipleError,
@@ -114,15 +113,17 @@ export const SELECT_PANEL_INDENT_PADDING_X = SELECT_PANEL_PADDING_X * 2;
 /** The height of the select items in `em` units. */
 export const SELECT_ITEM_HEIGHT_EM = 3;
 
+// TODO(josephperrott): Revert to a constant after 2018 spec updates are fully merged.
 /**
  * Distance between the panel edge and the option text in
  * multi-selection mode.
  *
+ * Calculated as:
  * (SELECT_PANEL_PADDING_X * 1.5) + 20 = 44
  * The padding is multiplied by 1.5 because the checkbox's margin is half the padding.
- * The checkbox width is 20px.
+ * The checkbox width is 16px.
  */
-export const SELECT_MULTIPLE_PANEL_PADDING_X = SELECT_PANEL_PADDING_X * 1.5 + 20;
+export let SELECT_MULTIPLE_PANEL_PADDING_X = 0;
 
 /**
  * The select panel will only "fit" inside the viewport if it is positioned at
@@ -136,7 +137,7 @@ export const MAT_SELECT_SCROLL_STRATEGY =
 
 /** @docs-private */
 export function MAT_SELECT_SCROLL_STRATEGY_PROVIDER_FACTORY(overlay: Overlay):
-    () => RepositionScrollStrategy {
+    () => ScrollStrategy {
   return () => overlay.scrollStrategies.reposition();
 }
 
@@ -165,8 +166,13 @@ export class MatSelectBase {
               public _parentFormGroup: FormGroupDirective,
               public ngControl: NgControl) {}
 }
-export const _MatSelectMixinBase = mixinDisableRipple(
-    mixinTabIndex(mixinDisabled(mixinErrorState(MatSelectBase))));
+export const _MatSelectMixinBase:
+    CanDisableCtor &
+    HasTabIndexCtor &
+    CanDisableRippleCtor &
+    CanUpdateErrorStateCtor &
+    typeof MatSelectBase =
+        mixinDisableRipple(mixinTabIndex(mixinDisabled(mixinErrorState(MatSelectBase))));
 
 
 /**
@@ -186,14 +192,13 @@ export class MatSelectTrigger {}
   styleUrls: ['select.css'],
   inputs: ['disabled', 'disableRipple', 'tabIndex'],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     'role': 'listbox',
     '[attr.id]': 'id',
     '[attr.tabindex]': 'tabIndex',
-    '[attr.aria-label]': '_ariaLabel',
-    '[attr.aria-labelledby]': 'ariaLabelledby',
+    '[attr.aria-label]': '_getAriaLabel()',
+    '[attr.aria-labelledby]': '_getAriaLabelledby()',
     '[attr.aria-required]': 'required.toString()',
     '[attr.aria-disabled]': 'disabled.toString()',
     '[attr.aria-invalid]': 'errorState',
@@ -204,14 +209,15 @@ export class MatSelectTrigger {}
     '[class.mat-select-disabled]': 'disabled',
     '[class.mat-select-invalid]': 'errorState',
     '[class.mat-select-required]': 'required',
+    '[class.mat-select-empty]': 'empty',
     'class': 'mat-select',
     '(keydown)': '_handleKeydown($event)',
     '(focus)': '_onFocus()',
     '(blur)': '_onBlur()',
   },
   animations: [
-    matSelectAnimations.transformPanel,
-    matSelectAnimations.fadeInContent
+    matSelectAnimations.transformPanelWrap,
+    matSelectAnimations.transformPanel
   ],
   providers: [
     {provide: MatFormFieldControl, useExisting: MatSelect},
@@ -221,6 +227,8 @@ export class MatSelectTrigger {}
 export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, OnChanges,
     OnDestroy, OnInit, DoCheck, ControlValueAccessor, CanDisable, HasTabIndex,
     MatFormFieldControl<any>, CanUpdateErrorState, CanDisableRipple {
+  private _scrollStrategyFactory: () => ScrollStrategy;
+
   /** Whether or not the overlay panel is open. */
   private _panelOpen = false;
 
@@ -272,11 +280,11 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   /** The value of the select panel's transform-origin property. */
   _transformOrigin: string = 'top';
 
-  /** Whether the panel's animation is done. */
-  _panelDoneAnimating: boolean = false;
+  /** Emits when the panel element is finished transforming in. */
+  _panelDoneAnimatingStream = new Subject<string>();
 
   /** Strategy that will be used to handle scrolling while the select panel is open. */
-  _scrollStrategy = this._scrollStrategyFactory();
+  _scrollStrategy: ScrollStrategy;
 
   /**
    * The y-offset of the overlay panel in relation to the trigger's top start corner.
@@ -306,20 +314,33 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     },
   ];
 
+  /** Whether the component is disabling centering of the active option over the trigger. */
+  private _disableOptionCentering: boolean = false;
+
   /** Whether the select is focused. */
-  focused: boolean = false;
+  get focused(): boolean {
+    return this._focused || this._panelOpen;
+  }
+  /**
+   * @deprecated Setter to be removed as this property is intended to be readonly.
+   * @breaking-change 8.0.0
+   */
+  set focused(value: boolean) {
+    this._focused = value;
+  }
+  private _focused = false;
 
   /** A name for this control that can be used by `mat-form-field`. */
   controlType = 'mat-select';
 
   /** Trigger that opens the select. */
-  @ViewChild('trigger') trigger: ElementRef;
+  @ViewChild('trigger', {static: false}) trigger: ElementRef;
 
   /** Panel containing the select options. */
-  @ViewChild('panel') panel: ElementRef;
+  @ViewChild('panel', {static: false}) panel: ElementRef;
 
   /** Overlay pane containing the options. */
-  @ViewChild(CdkConnectedOverlay) overlayDir: CdkConnectedOverlay;
+  @ViewChild(CdkConnectedOverlay, {static: false}) overlayDir: CdkConnectedOverlay;
 
   /** All of the defined select options. */
   @ContentChildren(MatOption, { descendants: true }) options: QueryList<MatOption>;
@@ -331,7 +352,7 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   @Input() panelClass: string|string[]|Set<string>|{[key: string]: any};
 
   /** User-supplied override of the trigger element. */
-  @ContentChild(MatSelectTrigger) customTrigger: MatSelectTrigger;
+  @ContentChild(MatSelectTrigger, {static: false}) customTrigger: MatSelectTrigger;
 
   /** Placeholder to be shown if no value has been selected. */
   @Input()
@@ -360,8 +381,15 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     this._multiple = coerceBooleanProperty(value);
   }
 
+  /** Whether to center the active option over the trigger. */
+  @Input()
+  get disableOptionCentering(): boolean { return this._disableOptionCentering; }
+  set disableOptionCentering(value: boolean) {
+    this._disableOptionCentering = coerceBooleanProperty(value);
+  }
+
   /**
-   * A function to compare the option values with the selected values. The first argument
+   * Function to compare the option values with the selected values. The first argument
    * is a value from an option. The second is a value from the selection. A boolean
    * should be returned.
    */
@@ -395,8 +423,14 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   /** Input that can be used to specify the `aria-labelledby` attribute. */
   @Input('aria-labelledby') ariaLabelledby: string;
 
-  /** An object used to control when error messages are shown. */
+  /** Object used to control when error messages are shown. */
   @Input() errorStateMatcher: ErrorStateMatcher;
+
+  /**
+   * Function used to sort the values in a select in multiple mode.
+   * Follows the same logic as `Array.prototype.sort`.
+   */
+  @Input() sortComparator: (a: MatOption, b: MatOption, options: MatOption[]) => number;
 
   /** Unique id of the element. */
   @Input()
@@ -416,47 +450,22 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     return this._ngZone.onStable
       .asObservable()
       .pipe(take(1), switchMap(() => this.optionSelectionChanges));
-  });
+  }) as Observable<MatOptionSelectionChange>;
 
-   /** Event emitted when the select has been opened. */
-   @Output() readonly openedChange: EventEmitter<boolean> = new EventEmitter<boolean>();
+  /** Event emitted when the select panel has been toggled. */
+  @Output() readonly openedChange: EventEmitter<boolean> = new EventEmitter<boolean>();
 
-   /** Event emitted when the select has been opened. */
-   @Output('opened')
-   get _openedStream(): Observable<void> {
-    return this.openedChange.pipe(filter(o => o), map(() => {}));
-  }
+  /** Event emitted when the select has been opened. */
+  @Output('opened') readonly _openedStream: Observable<void> =
+      this.openedChange.pipe(filter(o => o), map(() => {}));
 
   /** Event emitted when the select has been closed. */
-  @Output('closed')
-  get _closedStream(): Observable<void> {
-    return this.openedChange.pipe(filter(o => !o), map(() => {}));
-  }
-
-  /**
-   * Event emitted when the select has been opened.
-   * @deprecated Use `openedChange` instead.
-   * @deletion-target 6.0.0
-   */
-  @Output() readonly onOpen: Observable<void> = this._openedStream;
-
-  /**
-   * Event emitted when the select has been closed.
-   * @deprecated Use `openedChange` instead.
-   * @deletion-target 6.0.0
-   */
-  @Output() readonly onClose: Observable<void> = this._closedStream;
+  @Output('closed') readonly _closedStream: Observable<void> =
+      this.openedChange.pipe(filter(o => !o), map(() => {}));
 
    /** Event emitted when the selected value has been changed by the user. */
   @Output() readonly selectionChange: EventEmitter<MatSelectChange> =
       new EventEmitter<MatSelectChange>();
-
-  /**
-   * Event emitted when the selected value has been changed by the user.
-   * @deprecated Use `selectionChange` instead.
-   * @deletion-target 6.0.0
-   */
-  @Output() readonly change: EventEmitter<MatSelectChange> = this.selectionChange;
 
   /**
    * Event that emits whenever the raw value of the select changes. This is here primarily
@@ -477,7 +486,12 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     @Optional() private _parentFormField: MatFormField,
     @Self() @Optional() public ngControl: NgControl,
     @Attribute('tabindex') tabIndex: string,
-    @Inject(MAT_SELECT_SCROLL_STRATEGY) private _scrollStrategyFactory) {
+    @Inject(MAT_SELECT_SCROLL_STRATEGY) scrollStrategyFactory: any,
+    /**
+     * @deprecated _liveAnnouncer to be turned into a required parameter.
+     * @breaking-change 8.0.0
+     */
+    private _liveAnnouncer?: LiveAnnouncer) {
     super(elementRef, _defaultErrorStateMatcher, _parentForm,
           _parentFormGroup, ngControl);
 
@@ -487,6 +501,8 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
       this.ngControl.valueAccessor = this;
     }
 
+    this._scrollStrategyFactory = scrollStrategyFactory;
+    this._scrollStrategy = this._scrollStrategyFactory();
     this.tabIndex = parseInt(tabIndex) || 0;
 
     // Force setter to be called in case id was not specified.
@@ -494,12 +510,42 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   }
 
   ngOnInit() {
-    this._selectionModel = new SelectionModel<MatOption>(this.multiple, undefined, false);
+    this._selectionModel = new SelectionModel<MatOption>(this.multiple);
     this.stateChanges.next();
+
+    // We need `distinctUntilChanged` here, because some browsers will
+    // fire the animation end event twice for the same animation. See:
+    // https://github.com/angular/angular/issues/24084
+    this._panelDoneAnimatingStream
+      .pipe(distinctUntilChanged(), takeUntil(this._destroy))
+      .subscribe(() => {
+        if (this.panelOpen) {
+          this._scrollTop = 0;
+          this.openedChange.emit(true);
+        } else {
+          this.openedChange.emit(false);
+          this.overlayDir.offsetX = 0;
+          this._changeDetectorRef.markForCheck();
+        }
+      });
+
+    this._viewportRuler.change()
+      .pipe(takeUntil(this._destroy))
+      .subscribe(() => {
+        if (this._panelOpen) {
+          this._triggerRect = this.trigger.nativeElement.getBoundingClientRect();
+          this._changeDetectorRef.markForCheck();
+        }
+      });
   }
 
   ngAfterContentInit() {
     this._initKeyManager();
+
+    this._selectionModel.onChange.pipe(takeUntil(this._destroy)).subscribe(event => {
+      event.added.forEach(option => option.select());
+      event.removed.forEach(option => option.deselect());
+    });
 
     this.options.changes.pipe(startWith(null), takeUntil(this._destroy)).subscribe(() => {
       this._resetOptions();
@@ -516,7 +562,7 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   ngOnChanges(changes: SimpleChanges) {
     // Updating the disabled state is handled by `mixinDisabled`, but we need to additionally let
     // the parent form field know to run change detection when the disabled state changes.
-    if (changes.disabled) {
+    if (changes['disabled']) {
       this.stateChanges.next();
     }
   }
@@ -534,14 +580,14 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
 
   /** Opens the overlay panel. */
   open(): void {
-    if (this.disabled || !this.options || !this.options.length) {
+    if (this.disabled || !this.options || !this.options.length || this._panelOpen) {
       return;
     }
 
     this._triggerRect = this.trigger.nativeElement.getBoundingClientRect();
     // Note: The computed font-size will be a string pixel value (e.g. "16px").
     // `parseInt` ignores the trailing 'px' and converts this to a number.
-    this._triggerFontSize = parseInt(getComputedStyle(this.trigger.nativeElement)['font-size']);
+    this._triggerFontSize = parseInt(getComputedStyle(this.trigger.nativeElement).fontSize || '0');
 
     this._panelOpen = true;
     this._keyManager.withHorizontalOrientation(null);
@@ -660,15 +706,31 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   private _handleClosedKeydown(event: KeyboardEvent): void {
     const keyCode = event.keyCode;
     const isArrowKey = keyCode === DOWN_ARROW || keyCode === UP_ARROW ||
-        keyCode === LEFT_ARROW || keyCode === RIGHT_ARROW;
+                       keyCode === LEFT_ARROW || keyCode === RIGHT_ARROW;
     const isOpenKey = keyCode === ENTER || keyCode === SPACE;
+    const manager = this._keyManager;
 
     // Open the select on ALT + arrow key to match the native <select>
-    if (isOpenKey || ((this.multiple || event.altKey) && isArrowKey)) {
+    if ((isOpenKey && !hasModifierKey(event)) || ((this.multiple || event.altKey) && isArrowKey)) {
       event.preventDefault(); // prevents the page from scrolling down when pressing space
       this.open();
     } else if (!this.multiple) {
-      this._keyManager.onKeydown(event);
+      const previouslySelectedOption = this.selected;
+
+      if (keyCode === HOME || keyCode === END) {
+        keyCode === HOME ? manager.setFirstItemActive() : manager.setLastItemActive();
+        event.preventDefault();
+      } else {
+        manager.onKeydown(event);
+      }
+
+      const selectedOption = this.selected;
+
+      // Since the value has changed, we need to announce it ourselves.
+      // @breaking-change 8.0.0 remove null check for _liveAnnouncer.
+      if (this._liveAnnouncer && selectedOption && previouslySelectedOption !== selectedOption) {
+        this._liveAnnouncer.announce((selectedOption as MatOption).viewValue);
+      }
     }
   }
 
@@ -685,9 +747,19 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
       // Close the select on ALT + arrow key to match the native <select>
       event.preventDefault();
       this.close();
-    } else if ((keyCode === ENTER || keyCode === SPACE) && manager.activeItem) {
+    } else if ((keyCode === ENTER || keyCode === SPACE) && manager.activeItem &&
+      !hasModifierKey(event)) {
       event.preventDefault();
       manager.activeItem._selectViaInteraction();
+    } else if (this._multiple && keyCode === A && event.ctrlKey) {
+      event.preventDefault();
+      const hasDeselectedOptions = this.options.some(opt => !opt.disabled && !opt.selected);
+
+      this.options.forEach(option => {
+        if (!option.disabled) {
+          hasDeselectedOptions ? option.select() : option.deselect();
+        }
+      });
     } else {
       const previouslyFocusedIndex = manager.activeItemIndex;
 
@@ -700,34 +772,9 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     }
   }
 
-  /**
-   * When the panel element is finished transforming in (though not fading in), it
-   * emits an event and focuses an option if the panel is open.
-   */
-  _onPanelDone(): void {
-    if (this.panelOpen) {
-      this._scrollTop = 0;
-      this.openedChange.emit(true);
-    } else {
-      this.openedChange.emit(false);
-      this._panelDoneAnimating = false;
-      this.overlayDir.offsetX = 0;
-      this._changeDetectorRef.markForCheck();
-    }
-  }
-
-  /**
-   * When the panel content is done fading in, the _panelDoneAnimating property is
-   * set so the proper class can be added to the panel.
-   */
-  _onFadeInDone(): void {
-    this._panelDoneAnimating = this.panelOpen;
-    this._changeDetectorRef.markForCheck();
-  }
-
   _onFocus() {
     if (!this.disabled) {
-      this.focused = true;
+      this._focused = true;
       this.stateChanges.next();
     }
   }
@@ -737,7 +784,7 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
    * "blur" to the panel when it opens, causing a false positive.
    */
   _onBlur() {
-    this.focused = false;
+    this._focused = false;
 
     if (!this.disabled && !this.panelOpen) {
       this._onTouched();
@@ -751,6 +798,7 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
    */
   _onAttached(): void {
     this.overlayDir.positionChange.pipe(take(1)).subscribe(() => {
+      this._setPseudoCheckboxPaddingSize();
       this._changeDetectorRef.detectChanges();
       this._calculateOverlayOffsetX();
       this.panel.nativeElement.scrollTop = this._scrollTop;
@@ -760,6 +808,17 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   /** Returns the theme to be used on the panel. */
   _getPanelTheme(): string {
     return this._parentFormField ? `mat-${this._parentFormField.color}` : '';
+  }
+
+  // TODO(josephperrott): Remove after 2018 spec updates are fully merged.
+  /** Sets the pseudo checkbox padding size based on the width of the pseudo checkbox. */
+  private _setPseudoCheckboxPaddingSize() {
+    if (!SELECT_MULTIPLE_PANEL_PADDING_X && this.multiple) {
+      const pseudoCheckbox = this.panel.nativeElement.querySelector('.mat-pseudo-checkbox');
+      if (pseudoCheckbox) {
+        SELECT_MULTIPLE_PANEL_PADDING_X = SELECT_PANEL_PADDING_X * 1.5 + pseudoCheckbox.offsetWidth;
+      }
+    }
   }
 
   /** Whether the select has a value. */
@@ -772,6 +831,7 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     // has changed after it was checked" errors from Angular.
     Promise.resolve().then(() => {
       this._setSelectionByValue(this.ngControl ? this.ngControl.value : this._value);
+      this.stateChanges.next();
     });
   }
 
@@ -779,24 +839,23 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
    * Sets the selected option based on a value. If no option can be
    * found with the designated value, the select trigger is cleared.
    */
-  private _setSelectionByValue(value: any | any[], isUserInput = false): void {
+  private _setSelectionByValue(value: any | any[]): void {
     if (this.multiple && value) {
       if (!Array.isArray(value)) {
         throw getMatSelectNonArrayValueError();
       }
 
-      this._clearSelection();
-      value.forEach((currentValue: any) => this._selectValue(currentValue, isUserInput));
+      this._selectionModel.clear();
+      value.forEach((currentValue: any) => this._selectValue(currentValue));
       this._sortValues();
     } else {
-      this._clearSelection();
-
-      const correspondingOption = this._selectValue(value, isUserInput);
+      this._selectionModel.clear();
+      const correspondingOption = this._selectValue(value);
 
       // Shift focus to the active item. Note that we shouldn't do this in multiple
       // mode, because we don't know what option the user interacted with last.
       if (correspondingOption) {
-        this._keyManager.setActiveItem(this.options.toArray().indexOf(correspondingOption));
+        this._keyManager.setActiveItem(correspondingOption);
       }
     }
 
@@ -807,7 +866,7 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
    * Finds and selects and option based on its value.
    * @returns Option that has the corresponding value.
    */
-  private _selectValue(value: any, isUserInput = false): MatOption | undefined {
+  private _selectValue(value: any): MatOption | undefined {
     const correspondingOption = this.options.find((option: MatOption) => {
       try {
         // Treat null as a special reset value.
@@ -822,27 +881,10 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     });
 
     if (correspondingOption) {
-      isUserInput ? correspondingOption._selectViaInteraction() : correspondingOption.select();
       this._selectionModel.select(correspondingOption);
-      this.stateChanges.next();
     }
 
     return correspondingOption;
-  }
-
-
-  /**
-   * Clears the select trigger and deselects every option in the list.
-   * @param skip Option that should not be deselected.
-   */
-  private _clearSelection(skip?: MatOption): void {
-    this._selectionModel.clear();
-    this.options.forEach(option => {
-      if (option !== skip) {
-        option.deselect();
-      }
-    });
-    this.stateChanges.next();
   }
 
   /** Sets up a key manager to listen to keyboard events on the overlay panel. */
@@ -850,9 +892,16 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     this._keyManager = new ActiveDescendantKeyManager<MatOption>(this.options)
       .withTypeAhead()
       .withVerticalOrientation()
-      .withHorizontalOrientation(this._isRtl() ? 'rtl' : 'ltr');
+      .withHorizontalOrientation(this._isRtl() ? 'rtl' : 'ltr')
+      .withAllowedModifierKeys(['shiftKey']);
 
-      this._keyManager.tabOut.pipe(takeUntil(this._destroy)).subscribe(() => this.close());
+    this._keyManager.tabOut.pipe(takeUntil(this._destroy)).subscribe(() => {
+      // Restore focus to the trigger before closing. Ensures that the focus
+      // position won't be lost if the user got focus into the overlay.
+      this.focus();
+      this.close();
+    });
+
     this._keyManager.change.pipe(takeUntil(this._destroy)).subscribe(() => {
       if (this._panelOpen && this.panel) {
         this._scrollActiveOptionIntoView();
@@ -866,16 +915,14 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   private _resetOptions(): void {
     const changedOrDestroyed = merge(this.options.changes, this._destroy);
 
-    this.optionSelectionChanges
-      .pipe(takeUntil(changedOrDestroyed), filter(event => event.isUserInput))
-      .subscribe(event => {
-        this._onSelect(event.source);
+    this.optionSelectionChanges.pipe(takeUntil(changedOrDestroyed)).subscribe(event => {
+      this._onSelect(event.source, event.isUserInput);
 
-        if (!this.multiple && this._panelOpen) {
-          this.close();
-          this.focus();
-        }
-      });
+      if (event.isUserInput && !this.multiple && this._panelOpen) {
+        this.close();
+        this.focus();
+      }
+    });
 
     // Listen to changes in the internal state of the options and react accordingly.
     // Handles cases like the labels of the selected options changing.
@@ -890,44 +937,48 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   }
 
   /** Invoked when an option is clicked. */
-  private _onSelect(option: MatOption): void {
+  private _onSelect(option: MatOption, isUserInput: boolean): void {
     const wasSelected = this._selectionModel.isSelected(option);
 
-    // TODO(crisbeto): handle blank/null options inside multi-select.
-    if (this.multiple) {
-      this._selectionModel.toggle(option);
-      this.stateChanges.next();
-      wasSelected ? option.deselect() : option.select();
-      this._keyManager.setActiveItem(this._getOptionIndex(option)!);
-      this._sortValues();
+    if (option.value == null && !this._multiple) {
+      option.deselect();
+      this._selectionModel.clear();
+      this._propagateChanges(option.value);
     } else {
-      this._clearSelection(option.value == null ? undefined : option);
+      option.selected ? this._selectionModel.select(option) : this._selectionModel.deselect(option);
 
-      if (option.value == null) {
-        this._propagateChanges(option.value);
-      } else {
-        this._selectionModel.select(option);
-        this.stateChanges.next();
+      if (isUserInput) {
+        this._keyManager.setActiveItem(option);
+      }
+
+      if (this.multiple) {
+        this._sortValues();
+
+        if (isUserInput) {
+          // In case the user selected the option with their mouse, we
+          // want to restore focus back to the trigger, in order to
+          // prevent the select keyboard controls from clashing with
+          // the ones from `mat-option`.
+          this.focus();
+        }
       }
     }
 
     if (wasSelected !== this._selectionModel.isSelected(option)) {
       this._propagateChanges();
     }
+
+    this.stateChanges.next();
   }
 
-  /**
-   * Sorts the model values, ensuring that they keep the same
-   * order that they have in the panel.
-   */
-  private _sortValues(): void {
-    if (this._multiple) {
-      this._selectionModel.clear();
+  /** Sorts the selected values in the selected based on their order in the panel. */
+  private _sortValues() {
+    if (this.multiple) {
+      const options = this.options.toArray();
 
-      this.options.forEach(option => {
-        if (option.selected) {
-          this._selectionModel.select(option);
-        }
+      this._selectionModel.sort((a, b) => {
+        return this.sortComparator ? this.sortComparator(a, b, options) :
+                                     options.indexOf(a) - options.indexOf(b);
       });
       this.stateChanges.next();
     }
@@ -964,26 +1015,23 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
       if (this.empty) {
         this._keyManager.setFirstItemActive();
       } else {
-        this._keyManager.setActiveItem(this._getOptionIndex(this._selectionModel.selected[0])!);
+        this._keyManager.setActiveItem(this._selectionModel.selected[0]);
       }
     }
   }
 
   /** Scrolls the active option into view. */
   private _scrollActiveOptionIntoView(): void {
-    const itemHeight = this._getItemHeight();
     const activeOptionIndex = this._keyManager.activeItemIndex || 0;
-    const labelCount = MatOption.countGroupLabelsBeforeOption(activeOptionIndex,
-        this.options, this.optionGroups);
-    const scrollOffset = (activeOptionIndex + labelCount) * itemHeight;
-    const panelTop = this.panel.nativeElement.scrollTop;
+    const labelCount = _countGroupLabelsBeforeOption(activeOptionIndex, this.options,
+        this.optionGroups);
 
-    if (scrollOffset < panelTop) {
-      this.panel.nativeElement.scrollTop = scrollOffset;
-    } else if (scrollOffset + itemHeight > panelTop + SELECT_PANEL_MAX_HEIGHT) {
-      this.panel.nativeElement.scrollTop =
-          Math.max(0, scrollOffset - SELECT_PANEL_MAX_HEIGHT + itemHeight);
-    }
+    this.panel.nativeElement.scrollTop = _getOptionScrollPosition(
+      activeOptionIndex + labelCount,
+      this._getItemHeight(),
+      this.panel.nativeElement.scrollTop,
+      SELECT_PANEL_MAX_HEIGHT
+    );
   }
 
   /** Focuses the select element. */
@@ -993,7 +1041,7 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
 
   /** Gets the index of the provided option in the option list. */
   private _getOptionIndex(option: MatOption): number | undefined {
-    return this.options.reduce((result: number, current: MatOption, index: number) => {
+    return this.options.reduce((result: number | undefined, current: MatOption, index: number) => {
       return result === undefined ? (option === current ? index : undefined) : result;
     }, undefined);
   }
@@ -1012,8 +1060,8 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     let selectedOptionOffset =
         this.empty ? 0 : this._getOptionIndex(this._selectionModel.selected[0])!;
 
-    selectedOptionOffset += MatOption.countGroupLabelsBeforeOption(selectedOptionOffset,
-        this.options, this.optionGroups);
+    selectedOptionOffset += _countGroupLabelsBeforeOption(selectedOptionOffset, this.options,
+        this.optionGroups);
 
     // We must maintain a scroll buffer so the selected option will be scrolled to the
     // center of the overlay panel rather than the top.
@@ -1046,10 +1094,26 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
   }
 
   /** Returns the aria-label of the select component. */
-  get _ariaLabel(): string | null {
-    // If an ariaLabelledby value has been set, the select should not overwrite the
+  _getAriaLabel(): string | null {
+    // If an ariaLabelledby value has been set by the consumer, the select should not overwrite the
     // `aria-labelledby` value by setting the ariaLabel to the placeholder.
     return this.ariaLabelledby ? null : this.ariaLabel || this.placeholder;
+  }
+
+  /** Returns the aria-labelledby of the select component. */
+  _getAriaLabelledby(): string | null {
+    if (this.ariaLabelledby) {
+      return this.ariaLabelledby;
+    }
+
+    // Note: we use `_getAriaLabel` here, because we want to check whether there's a
+    // computed label. `this.ariaLabel` is only the user-specified label.
+    if (!this._parentFormField || !this._parentFormField._hasFloatingLabel() ||
+      this._getAriaLabel()) {
+      return null;
+    }
+
+    return this._parentFormField._labelId || null;
   }
 
   /** Determines the `aria-activedescendant` to be set on the host. */
@@ -1102,8 +1166,9 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     }
 
     // Set the offset directly in order to avoid having to go through change detection and
-    // potentially triggering "changed after it was checked" errors.
-    this.overlayDir.offsetX = offsetX;
+    // potentially triggering "changed after it was checked" errors. Round the value to avoid
+    // blurry content in some browsers.
+    this.overlayDir.offsetX = Math.round(offsetX);
     this.overlayDir.overlayRef.updatePosition();
   }
 
@@ -1118,6 +1183,11 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
     const optionHeightAdjustment = (itemHeight - this._triggerRect.height) / 2;
     const maxOptionsDisplayed = Math.floor(SELECT_PANEL_MAX_HEIGHT / itemHeight);
     let optionOffsetFromPanelTop: number;
+
+    // Disable offset if requested by user by returning 0 as value to offset
+    if (this._disableOptionCentering) {
+      return 0;
+    }
 
     if (this._scrollTop === 0) {
       optionOffsetFromPanelTop = selectedIndex * itemHeight;
@@ -1142,10 +1212,10 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
       optionOffsetFromPanelTop = scrollBuffer - itemHeight / 2;
     }
 
-    // The final offset is the option's offset from the top, adjusted for the height
-    // difference, multiplied by -1 to ensure that the overlay moves in the correct
-    // direction up the page.
-    return optionOffsetFromPanelTop * -1 - optionHeightAdjustment;
+    // The final offset is the option's offset from the top, adjusted for the height difference,
+    // multiplied by -1 to ensure that the overlay moves in the correct direction up the page.
+    // The value is rounded to prevent some browsers from blurring the content.
+    return Math.round(optionOffsetFromPanelTop * -1 - optionHeightAdjustment);
   }
 
   /**
@@ -1259,7 +1329,7 @@ export class MatSelect extends _MatSelectMixinBase implements AfterContentInit, 
    * Implemented as part of MatFormFieldControl.
    * @docs-private
    */
-  get shouldPlaceholderFloat(): boolean {
+  get shouldLabelFloat(): boolean {
     return this._panelOpen || !this.empty;
   }
 }

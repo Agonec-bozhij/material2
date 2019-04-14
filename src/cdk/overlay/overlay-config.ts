@@ -7,9 +7,8 @@
  */
 
 import {PositionStrategy} from './position/position-strategy';
-import {Direction} from '@angular/cdk/bidi';
-import {ScrollStrategy} from './scroll/scroll-strategy';
-import {NoopScrollStrategy} from './scroll/noop-scroll-strategy';
+import {Direction, Directionality} from '@angular/cdk/bidi';
+import {ScrollStrategy, NoopScrollStrategy} from './scroll/index';
 
 
 /** Initial configuration used when creating an overlay. */
@@ -27,7 +26,7 @@ export class OverlayConfig {
   hasBackdrop?: boolean = false;
 
   /** Custom class to add to the backdrop */
-  backdropClass?: string = 'cdk-overlay-dark-backdrop';
+  backdropClass?: string | string[] = 'cdk-overlay-dark-backdrop';
 
   /** The width of the overlay panel. If a number is provided, pixel units are assumed. */
   width?: number | string;
@@ -47,14 +46,28 @@ export class OverlayConfig {
   /** The max-height of the overlay panel. If a number is provided, pixel units are assumed. */
   maxHeight?: number | string;
 
-  /** The direction of the text in the overlay panel. */
-  direction?: Direction = 'ltr';
+  /**
+   * Direction of the text in the overlay panel. If a `Directionality` instance
+   * is passed in, the overlay will handle changes to its value automatically.
+   */
+  direction?: Direction | Directionality;
+
+  /**
+   * Whether the overlay should be disposed of when the user goes backwards/forwards in history.
+   * Note that this usually doesn't include clicking on links (unless the user is using
+   * the `HashLocationStrategy`).
+   */
+  disposeOnNavigation?: boolean = false;
 
   constructor(config?: OverlayConfig) {
     if (config) {
-      Object.keys(config)
-        .filter(key => typeof config[key] !== 'undefined')
-        .forEach(key => this[key] = config[key]);
+      Object.keys(config).forEach(k => {
+        const key = k as keyof OverlayConfig;
+
+        if (typeof config[key] !== 'undefined') {
+          this[key] = config[key];
+        }
+      });
     }
   }
 }

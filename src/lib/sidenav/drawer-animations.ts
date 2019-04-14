@@ -14,18 +14,27 @@ import {
   AnimationTriggerMetadata,
 } from '@angular/animations';
 
-/** Animations used by the Material drawers. */
+/**
+ * Animations used by the Material drawers.
+ * @docs-private
+ */
 export const matDrawerAnimations: {
   readonly transformDrawer: AnimationTriggerMetadata;
 } = {
   /** Animation that slides a drawer in and out. */
   transformDrawer: trigger('transform', [
+    // We remove the `transform` here completely, rather than setting it to zero, because:
+    // 1. Having a transform can cause elements with ripples or an animated
+    //    transform to shift around in Chrome with an RTL layout (see #10023).
+    // 2. 3d transforms causes text to appear blurry on IE and Edge.
     state('open, open-instant', style({
-      transform: 'translate3d(0, 0, 0)',
-      visibility: 'visible',
+      'transform': 'none',
+      'visibility': 'visible',
     })),
     state('void', style({
-      visibility: 'hidden',
+      // Avoids the shadow showing up when closed in SSR.
+      'box-shadow': 'none',
+      'visibility': 'hidden',
     })),
     transition('void => open-instant', animate('0ms')),
     transition('void <=> open, open-instant => void',

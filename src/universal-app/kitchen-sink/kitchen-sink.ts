@@ -1,16 +1,22 @@
-import {Component, NgModule} from '@angular/core';
-import {ServerModule} from '@angular/platform-server';
-import {BrowserModule} from '@angular/platform-browser';
+import {FocusMonitor} from '@angular/cdk/a11y';
+import {DragDropModule} from '@angular/cdk/drag-drop';
+import {ScrollingModule, ViewportRuler} from '@angular/cdk/scrolling';
+import {CdkTableModule, DataSource} from '@angular/cdk/table';
+import {Component, ElementRef, NgModule} from '@angular/core';
 import {
   MatAutocompleteModule,
+  MatBadgeModule,
+  MatBottomSheet,
+  MatBottomSheetModule,
   MatButtonModule,
   MatButtonToggleModule,
   MatCardModule,
   MatCheckboxModule,
   MatChipsModule,
   MatDatepickerModule,
-  MatDividerModule,
+  MatDialog,
   MatDialogModule,
+  MatDividerModule,
   MatExpansionModule,
   MatFormFieldModule,
   MatGridListModule,
@@ -28,24 +34,16 @@ import {
   MatSidenavModule,
   MatSliderModule,
   MatSlideToggleModule,
+  MatSnackBar,
   MatSnackBarModule,
   MatSortModule,
+  MatStepperModule,
   MatTableModule,
   MatTabsModule,
   MatToolbarModule,
   MatTooltipModule,
-  MatStepperModule,
-  MatSnackBar,
-  MatDialog,
 } from '@angular/material';
-import {
-  CdkTableModule,
-  DataSource
-} from '@angular/cdk/table';
-import {Overlay} from '@angular/cdk/overlay';
-
-import {of as observableOf} from 'rxjs/observable/of';
-import {Observable} from 'rxjs/Observable';
+import {Observable, of as observableOf} from 'rxjs';
 
 export class TableDataSource extends DataSource<any> {
   connect(): Observable<any> {
@@ -59,37 +57,54 @@ export class TableDataSource extends DataSource<any> {
 @Component({
   template: `<button>Do the thing</button>`
 })
-export class TestDialog {}
+export class TestEntryComponent {}
 
 
 @Component({
   selector: 'kitchen-sink',
   templateUrl: './kitchen-sink.html',
-  styleUrls: ['./kitchen-sink.css'],
+  styles: [`
+    .universal-viewport {
+      height: 100px;
+      border: 1px solid black;
+    }
+  `]
 })
 export class KitchenSink {
-
   /** List of columns for the CDK and Material table. */
   tableColumns = ['userId'];
 
   /** Data source for the CDK and Material table. */
   tableDataSource = new TableDataSource();
 
-  constructor(snackBar: MatSnackBar, dialog: MatDialog, overlay: Overlay) {
-    // Open a snack bar to do a basic sanity check of the overlays.
-    snackBar.open('Hello there');
+  /** Data used to render a virtual scrolling list. */
+  virtualScrollData = Array(10000).fill(50);
 
-    // TODO(crisbeto): use the noop scroll strategy until
-    // the fixes for the block scroll strategy get in.
-    dialog.open(TestDialog, {scrollStrategy: overlay.scrollStrategies.noop()});
+  constructor(
+    snackBar: MatSnackBar,
+    dialog: MatDialog,
+    viewportRuler: ViewportRuler,
+    focusMonitor: FocusMonitor,
+    elementRef: ElementRef<HTMLElement>,
+    bottomSheet: MatBottomSheet) {
+    focusMonitor.focusVia(elementRef, 'program');
+    snackBar.open('Hello there');
+    dialog.open(TestEntryComponent);
+    bottomSheet.open(TestEntryComponent);
+
+    // Do a sanity check on the viewport ruler.
+    viewportRuler.getViewportRect();
+    viewportRuler.getViewportSize();
+    viewportRuler.getViewportScrollPosition();
   }
 }
 
 
 @NgModule({
   imports: [
-    BrowserModule.withServerTransition({appId: 'kitchen-sink'}),
     MatAutocompleteModule,
+    MatBadgeModule,
+    MatBottomSheetModule,
     MatButtonModule,
     MatButtonToggleModule,
     MatCardModule,
@@ -122,19 +137,15 @@ export class KitchenSink {
     MatSortModule,
     MatTableModule,
     MatStepperModule,
+    ScrollingModule,
 
     // CDK Modules
-    CdkTableModule
+    CdkTableModule,
+    DragDropModule,
   ],
-  bootstrap: [KitchenSink],
-  declarations: [KitchenSink, TestDialog],
-  entryComponents: [TestDialog],
+  declarations: [KitchenSink, TestEntryComponent],
+  exports: [KitchenSink, TestEntryComponent],
+  entryComponents: [TestEntryComponent],
 })
-export class KitchenSinkClientModule { }
-
-
-@NgModule({
-  imports: [KitchenSinkClientModule, ServerModule],
-  bootstrap: [KitchenSink],
-})
-export class KitchenSinkServerModule { }
+export class KitchenSinkModule {
+}

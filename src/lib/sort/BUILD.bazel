@@ -1,35 +1,60 @@
 package(default_visibility=["//visibility:public"])
-load("@angular//:index.bzl", "ng_module")
-load("@io_bazel_rules_sass//sass:sass.bzl", "sass_library", "sass_binary")
 
+load("@io_bazel_rules_sass//:defs.bzl", "sass_library", "sass_binary")
+load("//tools:defaults.bzl", "ng_module", "ng_test_library", "ng_web_test_suite",
+  "markdown_to_html")
 
 ng_module(
   name = "sort",
   srcs = glob(["**/*.ts"], exclude=["**/*.spec.ts"]),
   module_name = "@angular/material/sort",
-  assets = [":sort_header_css"],
+  assets = [":sort-header.css"] + glob(["**/*.html"]),
   deps = [
-    "//src/lib/core",
+    "@npm//@angular/animations",
+    "@npm//@angular/common",
+    "@npm//@angular/core",
+    "@npm//rxjs",
     "//src/cdk/coercion",
-    "//src/cdk/table",
-    "@rxjs",
+    "//src/lib/core",
   ],
-  tsconfig = ":tsconfig-build.json",
 )
 
+sass_library(
+  name = "sort_scss_lib",
+  srcs = glob(["**/_*.scss"]),
+)
 
 sass_binary(
   name = "sort_header_scss",
   src = "sort-header.scss",
-  deps = ["//src/lib/core:core_scss_lib"],
+  deps = ["//src/cdk/a11y:a11y_scss_lib"],
 )
 
-# TODO(jelbourn): remove this when sass_binary supports specifying an output filename and dir.
-# Copy the output of the sass_binary such that the filename and path match what we expect.
-genrule(
-  name = "sort_header_css",
-  srcs = [":sort_header_scss"],
-  outs = ["sort-header.css"],
-  cmd = "cat $(locations :sort_header_scss) > $@",
+ng_test_library(
+  name = "sort_test_sources",
+  srcs = glob(["**/*.spec.ts"]),
+  deps = [
+    "@npm//@angular/platform-browser",
+    "@npm//rxjs",
+    "//src/cdk/collections",
+    "//src/cdk/table",
+    "//src/cdk/testing",
+    "//src/lib/table",
+    ":sort",
+  ]
 )
 
+ng_web_test_suite(
+  name = "unit_tests",
+  deps = [":sort_test_sources"],
+)
+
+markdown_to_html(
+  name = "overview",
+  srcs = [":sort.md"],
+)
+
+filegroup(
+  name = "source-files",
+  srcs = glob(["**/*.ts"]),
+)

@@ -16,7 +16,7 @@ a theme consists of:
 In Angular Material, all theme styles are generated _statically_ at build-time so that your
 app doesn't have to spend cycles generating theme styles on startup.
 
-[1]: https://material.google.com/style/color.html#color-color-palette
+[1]: https://material.io/archive/guidelines/style/color.html#color-color-palette
 
 ### Using a pre-built theme
 Angular Material comes prepackaged with several pre-built theme css files. These theme files also
@@ -35,7 +35,7 @@ Available pre-built themes:
 If you're using Angular CLI, this is as simple as including one line
 in your `styles.css`  file:
 ```css
-@import '~@angular/material/prebuilt-themes/deeppurple-amber.css';
+@import '@angular/material/prebuilt-themes/deeppurple-amber.css';
 ```
 
 Alternatively, you can just reference the file directly. This would look something like:
@@ -54,7 +54,7 @@ ensures that the proper theme background is applied to your page.
 When you want more customization than a pre-built theme offers, you can create your own theme file.
 
 A custom theme file does two things:
-1. Imports the `mat-core()` sass mixin. This includes all common styles that are used by multiple
+1. Imports the `mat-core()` Sass mixin. This includes all common styles that are used by multiple
 components. **This should only be included once in your application.** If this mixin is included
 multiple times, your application will end up with multiple copies of these common styles.
 2. Defines a **theme** data structure as the composition of multiple palettes. This object can be
@@ -75,7 +75,7 @@ A typical theme file will look something like this:
 
 // Define the palettes for your theme using the Material Design palettes available in palette.scss
 // (imported above). For each palette, you can optionally specify a default, lighter, and darker
-// hue. Available color palettes: https://www.google.com/design/spec/style/color.html
+// hue. Available color palettes: https://material.io/design/color/
 $candy-app-primary: mat-palette($mat-indigo);
 $candy-app-accent:  mat-palette($mat-pink, A200, A100, A400);
 
@@ -94,7 +94,7 @@ $candy-app-theme: mat-light-theme($candy-app-primary, $candy-app-accent, $candy-
 You only need this single Sass file; you do not need to use Sass to style the rest of your app.
 
 If you are using the Angular CLI, support for compiling Sass to css is built-in; you only have to
-add a new entry to the `"styles"` list in `angular-cli.json` pointing to the theme
+add a new entry to the `"styles"` list in `angular.json` pointing to the theme
 file (e.g., `unicorn-app-theme.scss`).
 
 If you're not using the Angular CLI, you can use any existing Sass tooling to build the file (such
@@ -104,8 +104,8 @@ node-sass src/unicorn-app-theme.scss dist/unicorn-app-theme.css
 ```
 and then include the output file in your index.html.
 
-The theme file **should not** be imported into other SCSS files. This will cause duplicate styles
-to be written into your CSS output. If you want to consume the theme definition object
+Your custom theme file **should not** be imported into other SCSS files. This will duplicate styles
+in your CSS output. If you want to consume your theme definition object
 (e.g., `$candy-app-theme`) in other SCSS files, then the definition of the theme object should be
 broken into its own file, separate from the inclusion of the `mat-core` and
 `angular-material-theme` mixins.
@@ -214,8 +214,3 @@ $candy-app-theme:   mat-light-theme($candy-app-primary, $candy-app-accent);
 ### Theming your own components
 For more details about theming your own components,
 see [theming-your-components.md](./theming-your-components.md).
-
-### Future work
-* Once CSS variables (custom properties) are available in all the browsers we support,
-  we will explore how to take advantage of them to make theming even simpler.
-* More prebuilt themes will be added as development continues.

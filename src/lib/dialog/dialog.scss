@@ -1,16 +1,13 @@
-@import '../core/style/elevation';
 @import '../core/style/vendor-prefixes';
 @import '../../cdk/a11y/a11y';
 
 
 $mat-dialog-padding: 24px !default;
-$mat-dialog-border-radius: 2px !default;
+$mat-dialog-border-radius: 4px !default;
 $mat-dialog-max-height: 65vh !default;
 $mat-dialog-button-margin: 8px !default;
 
 .mat-dialog-container {
-  @include mat-elevation(24);
-
   display: block;
   padding: $mat-dialog-padding;
   border-radius: $mat-dialog-border-radius;
@@ -21,6 +18,11 @@ $mat-dialog-button-margin: 8px !default;
   // The dialog container should completely fill its parent overlay element.
   width: 100%;
   height: 100%;
+
+  // Since the dialog won't stretch to fit the parent, if the height
+  // isn't set, we have to inherit the min and max values explicitly.
+  min-height: inherit;
+  max-height: inherit;
 
   @include cdk-high-contrast {
     outline: solid 1px;
@@ -34,9 +36,6 @@ $mat-dialog-button-margin: 8px !default;
   max-height: $mat-dialog-max-height;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
-
-  // Promote the content to a new GPU layer to avoid repaints on scroll.
-  @include backface-visibility(hidden);
 }
 
 .mat-dialog-title {
@@ -45,16 +44,14 @@ $mat-dialog-button-margin: 8px !default;
 }
 
 .mat-dialog-actions {
-  padding: $mat-dialog-padding / 2 0;
+  padding: 8px 0;
   display: flex;
   flex-wrap: wrap;
+  min-height: 52px;
+  align-items: center;
 
-  &:last-child {
-    // If the actions are the last element in a dialog, we need to pull them down
-    // over the dialog padding, in order to avoid the action's padding stacking
-    // with the dialog's.
-    margin-bottom: -$mat-dialog-padding;
-  }
+  // Pull the actions down to avoid their padding stacking with the dialog's padding.
+  margin-bottom: -$mat-dialog-padding;
 
   &[align='end'] {
     justify-content: flex-end;

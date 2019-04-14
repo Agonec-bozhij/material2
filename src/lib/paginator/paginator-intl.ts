@@ -6,18 +6,19 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {Injectable, SkipSelf, Optional } from '@angular/core';
-import {Subject} from 'rxjs/Subject';
+import {Injectable, Optional, SkipSelf} from '@angular/core';
+import {Subject} from 'rxjs';
+
 
 /**
  * To modify the labels and text displayed, create a new instance of MatPaginatorIntl and
  * include it in a custom provider
  */
-@Injectable()
+@Injectable({providedIn: 'root'})
 export class MatPaginatorIntl {
   /**
-   * Stream that emits whenever the labels here are changed. Use this to notify
-   * components if the labels have changed after initialization.
+   * Stream to emit from when labels are changed. Use this to notify components when the labels have
+   * changed after initialization.
    */
   readonly changes: Subject<void> = new Subject<void>();
 

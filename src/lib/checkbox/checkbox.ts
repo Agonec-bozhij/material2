@@ -6,10 +6,9 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {FocusMonitor, FocusOrigin} from '@angular/cdk/a11y';
+import {FocusMonitor} from '@angular/cdk/a11y';
 import {coerceBooleanProperty} from '@angular/cdk/coercion';
 import {
-  AfterViewInit,
   Attribute,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
@@ -19,25 +18,31 @@ import {
   forwardRef,
   Inject,
   Input,
+  NgZone,
   OnDestroy,
   Optional,
   Output,
   ViewChild,
   ViewEncapsulation,
+  AfterViewChecked,
 } from '@angular/core';
 import {ControlValueAccessor, NG_VALUE_ACCESSOR} from '@angular/forms';
 import {
   CanColor,
+  CanColorCtor,
   CanDisable,
+  CanDisableCtor,
   CanDisableRipple,
+  CanDisableRippleCtor,
   HasTabIndex,
+  HasTabIndexCtor,
   MatRipple,
   mixinColor,
   mixinDisabled,
   mixinDisableRipple,
   mixinTabIndex,
-  RippleRef,
 } from '@angular/material/core';
+import {ANIMATION_MODULE_TYPE} from '@angular/platform-browser/animations';
 import {MAT_CHECKBOX_CLICK_ACTION, MatCheckboxClickAction} from './checkbox-config';
 
 
@@ -83,8 +88,13 @@ export class MatCheckboxChange {
 export class MatCheckboxBase {
   constructor(public _elementRef: ElementRef) {}
 }
-export const _MatCheckboxMixinBase =
-  mixinTabIndex(mixinColor(mixinDisableRipple(mixinDisabled(MatCheckboxBase)), 'accent'));
+export const _MatCheckboxMixinBase:
+    HasTabIndexCtor &
+    CanColorCtor &
+    CanDisableRippleCtor &
+    CanDisableCtor &
+    typeof MatCheckboxBase =
+        mixinTabIndex(mixinColor(mixinDisableRipple(mixinDisabled(MatCheckboxBase)), 'accent'));
 
 
 /**
@@ -93,7 +103,7 @@ export const _MatCheckboxMixinBase =
  * disabled. Note that all additional accessibility attributes are taken care of by the component,
  * so there is no need to provide them yourself. However, if you want to omit a label and still
  * have the checkbox be accessible, you may supply an [aria-label] input.
- * See: https://www.google.com/design/spec/components/selection-controls.html
+ * See: https://material.io/design/components/selection-controls.html
  */
 @Component({
   moduleId: module.id,
@@ -104,19 +114,20 @@ export const _MatCheckboxMixinBase =
   host: {
     'class': 'mat-checkbox',
     '[id]': 'id',
+    '[attr.tabindex]': 'null',
     '[class.mat-checkbox-indeterminate]': 'indeterminate',
     '[class.mat-checkbox-checked]': 'checked',
     '[class.mat-checkbox-disabled]': 'disabled',
     '[class.mat-checkbox-label-before]': 'labelPosition == "before"',
+    '[class._mat-animation-noopable]': `_animationMode === 'NoopAnimations'`,
   },
   providers: [MAT_CHECKBOX_CONTROL_VALUE_ACCESSOR],
-  inputs: ['disabled', 'disableRipple', 'color', 'tabIndex'],
+  inputs: ['disableRipple', 'color', 'tabIndex'],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAccessor,
-    AfterViewInit, OnDestroy, CanColor, CanDisable, HasTabIndex, CanDisableRipple {
+    AfterViewChecked, OnDestroy, CanColor, CanDisable, HasTabIndex, CanDisableRipple {
 
   /**
    * Attached to the aria-label attribute of the host element. In most cases, arial-labelledby will
@@ -143,21 +154,6 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
   set required(value: boolean) { this._required = coerceBooleanProperty(value); }
   private _required: boolean;
 
-  /**
-   * Whether or not the checkbox should appear before or after the label.
-   * @deprecated
-   * @deletion-target 6.0.0
-   */
-  @Input()
-  get align(): 'start' | 'end' {
-    // align refers to the checkbox relative to the label, while labelPosition refers to the
-    // label relative to the checkbox. As such, they are inverted.
-    return this.labelPosition == 'after' ? 'start' : 'end';
-  }
-  set align(value: 'start' | 'end') {
-    this.labelPosition = (value == 'start') ? 'after' : 'before';
-  }
-
   /** Whether the label should appear after or before the checkbox. Defaults to 'after' */
   @Input() labelPosition: 'before' | 'after' = 'after';
 
@@ -175,10 +171,10 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
   @Input() value: string;
 
   /** The native `<input type="checkbox">` element */
-  @ViewChild('input') _inputElement: ElementRef;
+  @ViewChild('input', {static: false}) _inputElement: ElementRef<HTMLInputElement>;
 
   /** Reference to the ripple instance of the checkbox. */
-  @ViewChild(MatRipple) ripple: MatRipple;
+  @ViewChild(MatRipple, {static: false}) ripple: MatRipple;
 
   /**
    * Called when the checkbox is blurred. Needed to properly implement ControlValueAccessor.
@@ -192,28 +188,38 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
 
   private _controlValueAccessorChangeFn: (value: any) => void = () => {};
 
-  /** Reference to the focused state ripple. */
-  private _focusRipple: RippleRef | null;
-
-  constructor(elementRef: ElementRef,
+  constructor(elementRef: ElementRef<HTMLElement>,
               private _changeDetectorRef: ChangeDetectorRef,
               private _focusMonitor: FocusMonitor,
+              private _ngZone: NgZone,
               @Attribute('tabindex') tabIndex: string,
               @Optional() @Inject(MAT_CHECKBOX_CLICK_ACTION)
-                  private _clickAction: MatCheckboxClickAction) {
+                  private _clickAction: MatCheckboxClickAction,
+              @Optional() @Inject(ANIMATION_MODULE_TYPE) public _animationMode?: string) {
     super(elementRef);
 
     this.tabIndex = parseInt(tabIndex) || 0;
+
+    this._focusMonitor.monitor(elementRef, true).subscribe(focusOrigin => {
+      if (!focusOrigin) {
+        // When a focused element becomes disabled, the browser *immediately* fires a blur event.
+        // Angular does not expect events to be raised during change detection, so any state change
+        // (such as a form control's 'ng-touched') will cause a changed-after-checked error.
+        // See https://github.com/angular/angular/issues/17793. To work around this, we defer
+        // telling the form control it has been touched until the next tick.
+        Promise.resolve().then(() => {
+          this._onTouched();
+          _changeDetectorRef.markForCheck();
+        });
+      }
+    });
   }
 
-  ngAfterViewInit() {
-    this._focusMonitor
-      .monitor(this._inputElement.nativeElement)
-      .subscribe(focusOrigin => this._onInputFocusChange(focusOrigin));
-  }
+  // TODO: Delete next major revision.
+  ngAfterViewChecked() {}
 
   ngOnDestroy() {
-    this._focusMonitor.stopMonitoring(this._inputElement.nativeElement);
+    this._focusMonitor.stopMonitoring(this._elementRef);
   }
 
   /**
@@ -228,6 +234,22 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
     }
   }
   private _checked: boolean = false;
+
+  /**
+   * Whether the checkbox is disabled. This fully overrides the implementation provided by
+   * mixinDisabled, but the mixin is still required because mixinTabIndex requires it.
+   */
+  @Input()
+  get disabled() { return this._disabled; }
+  set disabled(value: any) {
+    const newValue = coerceBooleanProperty(value);
+
+    if (newValue !== this.disabled) {
+      this._disabled = newValue;
+      this._changeDetectorRef.markForCheck();
+    }
+  }
+  private _disabled: boolean = false;
 
   /**
    * Whether the checkbox is indeterminate. This is also known as "mixed" mode and can be used to
@@ -259,10 +281,12 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
 
   /** Method being called whenever the label text changes. */
   _onLabelTextChange() {
-    // This method is getting called whenever the label of the checkbox changes.
-    // Since the checkbox uses the OnPush strategy we need to notify it about the change
-    // that has been recognized by the cdkObserveContent directive.
-    this._changeDetectorRef.markForCheck();
+    // Since the event of the `cdkObserveContent` directive runs outside of the zone, the checkbox
+    // component will be only marked for check, but no actual change detection runs automatically.
+    // Instead of going back into the zone in order to trigger a change detection which causes
+    // *all* components to be checked (if explicitly marked or not using OnPush), we only trigger
+    // an explicit change detection for the checkbox view and it's children.
+    this._changeDetectorRef.detectChanges();
   }
 
   // Implemented as part of ControlValueAccessor.
@@ -283,7 +307,6 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
   // Implemented as part of ControlValueAccessor.
   setDisabledState(isDisabled: boolean) {
     this.disabled = isDisabled;
-    this._changeDetectorRef.markForCheck();
   }
 
   _getAriaChecked(): 'true' | 'false' | 'mixed' {
@@ -307,26 +330,25 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
 
     if (this._currentAnimationClass.length > 0) {
       element.classList.add(this._currentAnimationClass);
+
+      // Remove the animation class to avoid animation when the checkbox is moved between containers
+      const animationClass = this._currentAnimationClass;
+
+      this._ngZone.runOutsideAngular(() => {
+        setTimeout(() => {
+          element.classList.remove(animationClass);
+        }, 1000);
+      });
     }
   }
 
   private _emitChangeEvent() {
-    let event = new MatCheckboxChange();
+    const event = new MatCheckboxChange();
     event.source = this;
     event.checked = this.checked;
 
     this._controlValueAccessorChangeFn(this.checked);
     this.change.emit(event);
-  }
-
-  /** Function is called whenever the focus changes for the input element. */
-  private _onInputFocusChange(focusOrigin: FocusOrigin) {
-    if (!this._focusRipple && focusOrigin === 'keyboard') {
-      this._focusRipple = this.ripple.launch(0, 0, {persistent: true});
-    } else if (!focusOrigin) {
-      this._removeFocusRipple();
-      this._onTouched();
-    }
   }
 
   /** Toggles the `checked` state of the checkbox. */
@@ -380,7 +402,7 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
 
   /** Focuses the checkbox. */
   focus(): void {
-    this._focusMonitor.focusVia(this._inputElement.nativeElement, 'keyboard');
+    this._focusMonitor.focusVia(this._inputElement, 'keyboard');
   }
 
   _onInteractionEvent(event: Event) {
@@ -392,6 +414,11 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
 
   private _getAnimationClassForCheckStateTransition(
       oldState: TransitionCheckState, newState: TransitionCheckState): string {
+    // Don't transition if animations are disabled.
+    if (this._animationMode === 'NoopAnimations') {
+      return '';
+    }
+
     let animSuffix: string = '';
 
     switch (oldState) {
@@ -421,13 +448,5 @@ export class MatCheckbox extends _MatCheckboxMixinBase implements ControlValueAc
     }
 
     return `mat-checkbox-anim-${animSuffix}`;
-  }
-
-  /** Fades out the focus state ripple. */
-  private _removeFocusRipple(): void {
-    if (this._focusRipple) {
-      this._focusRipple.fadeOut();
-      this._focusRipple = null;
-    }
   }
 }

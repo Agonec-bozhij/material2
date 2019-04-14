@@ -9,9 +9,8 @@
 
 import {OverlayRef, GlobalPositionStrategy, OverlaySizeConfig} from '@angular/cdk/overlay';
 import {ESCAPE} from '@angular/cdk/keycodes';
-import {Observable} from 'rxjs/Observable';
-import {map} from 'rxjs/operators/map';
-import {filter} from 'rxjs/operators/filter';
+import {Observable} from 'rxjs';
+import {map, filter} from 'rxjs/operators';
 import {DialogPosition} from './dialog-config';
 import {CdkDialogContainer} from './dialog-container';
 
@@ -45,7 +44,7 @@ export class DialogRef<T, R = any> {
       });
     }
 
-    this.beforeClose().subscribe(() => {
+    this.beforeClosed().subscribe(() => {
       this._overlayRef.detachBackdrop();
     });
 
@@ -128,17 +127,17 @@ export class DialogRef<T, R = any> {
   }
 
   /** Gets an observable that emits when dialog begins opening. */
-  beforeOpen(): Observable<void> {
+  beforeOpened(): Observable<void> {
     return this._containerInstance._beforeEnter.asObservable();
   }
 
   /** Gets an observable that emits when dialog is finished opening. */
-  afterOpen(): Observable<void> {
+  afterOpened(): Observable<void> {
     return this._containerInstance._afterEnter.asObservable();
   }
 
   /** Gets an observable that emits when dialog begins closing. */
-  beforeClose(): Observable<R | undefined> {
+  beforeClosed(): Observable<R | undefined> {
     return this._containerInstance._beforeExit.pipe(map(() => this._result));
   }
 

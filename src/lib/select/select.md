@@ -1,12 +1,20 @@
 `<mat-select>` is a form control for selecting a value from a set of options, similar to the native
 `<select>` element. You can read more about selects in the
-[Material Design spec](https://material.google.com/components/menus.html). It is designed to work
+[Material Design spec](https://material.io/design/components/menus.html). It is designed to work
 inside of a [`<mat-form-field>`](https://material.angular.io/components/form-field/overview)
 element.
 
 To add options to the select, add `<mat-option>` elements to the `<mat-select>`. Each `<mat-option>`
 has a `value` property that can be used to set the value that will be selected if the user chooses
 this option. The content of the `<mat-option>` is what will be shown to the user.
+
+Angular Material also supports use of the native `<select>` element inside of
+`<mat-form-field>`. The native control has several performance, accessibility,
+and usability advantages. See [the documentation for
+form-field](https://material.angular.io/components/form-field) for more information.
+
+To use a native select inside `<mat-form-field>`, add  the `matNativeControl` attribute
+to the `<select>` element. 
 
 <!-- example(select-overview) -->
 
@@ -17,7 +25,7 @@ forms.
 
 <!-- example(select-value-binding) -->
 
-The `<mat-select>` also supports all of the form directives from the core `FormsModule` (`NgModel`) and
+Both`<mat-select>` and `<select>` support all of the form directives from the core `FormsModule` (`NgModel`) and
 `ReactiveFormsModule` (`FormControl`, `FormGroup`, etc.) As with native `<select>`, `<mat-select>`
 also supports a `compareWith` function. (Additional information about using a custom `compareWith`
 function can be found in the
@@ -27,7 +35,7 @@ function can be found in the
 
 ### Form field features
 
-There are a number of `<mat-form-field>` features that can be used with any `<mat-select>`. These
+There are a number of `<mat-form-field>` features that can be used with both `<select>` and `<mat-select>`. These
 include error messages, hint text, prefix & suffix, and theming. For additional information about
 these features, see the
 [form field documentation](https://material.angular.io/components/form-field/overview).
@@ -36,17 +44,16 @@ these features, see the
 
 ### Setting a static placeholder
 
-The placeholder is a text label displayed in the select trigger area when no value is selected. When
-a value is selected, the placeholder will float above the select trigger area. The placeholder can
-be specified either via a `placeholder` attribute on the `<mat-select>` or a `<mat-placeholder>`
-element in the same form field as the `<mat-select>`. The `<mat-form-field>` also has additional
-options for changing the behavior of the placeholder. For more information see the
-[form field placeholder documentation](https://material.angular.io/components/form-field/overview#floating-placeholder).
+The placeholder is text shown when the `<mat-form-field>` label is floating but the `<mat-select>`
+is empty. It is used to give the user an additional hint about the value they should select. The
+placeholder can be specified by setting the `placeholder` attribute on the `<mat-select>` element.
+In some cases that `<mat-form-field>` may use the placeholder as the label (see the
+[form field label documentation](https://material.angular.io/components/form-field/overview#floating-label)).
 
 ### Disabling the select or individual options
 
 It is possible to disable the entire select or individual options in the select by using the
-disabled property on the `<mat-select>` and the `<mat-option>` components respectively.
+disabled property on the `<select>` or `<mat-select>` and the `<option>` or <mat-option>` elements respectively.
 
 <!-- example(select-disabled) -->
 
@@ -72,11 +79,15 @@ by setting the `multiple` property. This will allow the user to select multiple 
 using the `<mat-select>` in multiple selection mode, its value will be a sorted list of all selected
 values rather than a single value.
 
+Using multiple selection with a native select element (`<select multiple>`) is discouraged
+inside `<mat-form-field>`, as the inline listbox appearance is inconsistent with other
+Material Design components.
+
 <!-- example(select-multiple) -->
 
 ### Customizing the trigger label
 
-If you want to display a custom trigger label inside a select, you can use the
+If you want to display a custom trigger label inside a `<mat-select>`, you can use the
 `<mat-select-trigger>` element.
 
 <!-- example(select-custom-trigger) -->
@@ -99,7 +110,7 @@ which can be used to apply additional CSS classes to the dropdown panel.
 
 The `<mat-form-field>` allows you to
 [associate error messages](https://material.angular.io/components/form-field/overview#error-messages)
-with your `<mat-select>`. By default, these error messages are shown when the control is invalid and
+with your `<select>` or `<mat-select>`. By default, these error messages are shown when the control is invalid and
 either the user has interacted with (touched) the element or the parent form has been submitted. If
 you wish to override this behavior (e.g. to show the error as soon as the invalid control is dirty
 or when a parent form group is invalid), you can use the `errorStateMatcher` property of the
@@ -131,10 +142,12 @@ globally cause input errors to show when the input is dirty and invalid.
 
 ### Accessibility
 
-The select component without text or label should be given a meaningful label via
+The `<mat-select>` component without text or label should be given a meaningful label via
 `aria-label` or `aria-labelledby`.
 
-The select component has `role="listbox"` and options inside select have `role="option"`.
+The `<mat-select>` component has `role="listbox"` and options inside select have `role="option"`.
+
+The native `<select>` offers the best accessibility because it is supported directly by screen-readers.
 
 ### Troubleshooting
 

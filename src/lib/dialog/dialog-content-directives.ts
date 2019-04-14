@@ -29,13 +29,13 @@ let dialogElementUid = 0;
   exportAs: 'matDialogClose',
   host: {
     '(click)': 'dialogRef.close(dialogResult)',
-    '[attr.aria-label]': 'ariaLabel',
+    '[attr.aria-label]': 'ariaLabel || null',
     'type': 'button', // Prevents accidental form submits.
   }
 })
 export class MatDialogClose implements OnInit, OnChanges {
   /** Screenreader label for the button. */
-  @Input('aria-label') ariaLabel: string = 'Close dialog';
+  @Input('aria-label') ariaLabel: string;
 
   /** Dialog close input. */
   @Input('mat-dialog-close') dialogResult: any;
@@ -44,7 +44,7 @@ export class MatDialogClose implements OnInit, OnChanges {
 
   constructor(
     @Optional() public dialogRef: MatDialogRef<any>,
-    private _elementRef: ElementRef,
+    private _elementRef: ElementRef<HTMLElement>,
     private _dialog: MatDialog) {}
 
   ngOnInit() {
@@ -59,7 +59,7 @@ export class MatDialogClose implements OnInit, OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges) {
-    const proxiedChange = changes._matDialogClose || changes._matDialogCloseResult;
+    const proxiedChange = changes['_matDialogClose'] || changes['_matDialogCloseResult'];
 
     if (proxiedChange) {
       this.dialogResult = proxiedChange.currentValue;
@@ -83,7 +83,7 @@ export class MatDialogTitle implements OnInit {
 
   constructor(
     @Optional() private _dialogRef: MatDialogRef<any>,
-    private _elementRef: ElementRef,
+    private _elementRef: ElementRef<HTMLElement>,
     private _dialog: MatDialog) {}
 
   ngOnInit() {
@@ -130,7 +130,7 @@ export class MatDialogActions {}
  * @param element Element relative to which to look for a dialog.
  * @param openDialogs References to the currently-open dialogs.
  */
-function getClosestDialog(element: ElementRef, openDialogs: MatDialogRef<any>[]) {
+function getClosestDialog(element: ElementRef<HTMLElement>, openDialogs: MatDialogRef<any>[]) {
   let parent: HTMLElement | null = element.nativeElement.parentElement;
 
   while (parent && !parent.classList.contains('mat-dialog-container')) {

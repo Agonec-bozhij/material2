@@ -6,7 +6,11 @@
     "stripInternal": false,
     "experimentalDecorators": true,
     "noUnusedParameters": true,
+    "noUnusedLocals": true,
     "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
     "module": "commonjs",
     "moduleResolution": "node",
     "outDir": ".",
@@ -20,7 +24,10 @@
     "paths": {
       "@angular/material": ["./material"],
       "@angular/cdk/*": ["./cdk/*"],
-      "@angular/material/*": ["./material/*"]
+      "@angular/material/*": ["./material/*"],
+      "@angular/cdk-experimental": ["./cdk-experimental"],
+      "@angular/cdk-experimental/*": ["./cdk-experimental/*"],
+      "@angular/material-experimental": ["./material-experimental"]
     }
   },
   "files": [

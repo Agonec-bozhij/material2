@@ -26,7 +26,10 @@ export class MatSnackBarConfig<D = any> {
   /** The politeness level for the MatAriaLiveAnnouncer announcement. */
   politeness?: AriaLivePoliteness = 'assertive';
 
-  /** Message to be announced by the MatAriaLiveAnnouncer */
+  /**
+   * Message to be announced by the LiveAnnouncer. When opening a snackbar without a custom
+   * component or template, the announcement message will default to the specified message.
+   */
   announcementMessage?: string = '';
 
   /** The view container to place the overlay for the snack bar into. */
@@ -38,15 +41,8 @@ export class MatSnackBarConfig<D = any> {
   /** Extra CSS classes to be added to the snack bar container. */
   panelClass?: string | string[];
 
-  /**
-   * Extra CSS classes to be added to the snack bar container.
-   * @deprecated Use `panelClass` instead.
-   * @deletion-target 6.0.0
-   */
-  extraClasses?: string | string[];
-
   /** Text layout direction for the snack bar. */
-  direction?: Direction = 'ltr';
+  direction?: Direction;
 
   /** Data being injected into the child component. */
   data?: D | null = null;

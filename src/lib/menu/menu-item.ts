@@ -14,20 +14,24 @@ import {
   OnDestroy,
   ViewEncapsulation,
   Inject,
+  Optional,
+  Input,
 } from '@angular/core';
 import {
-  CanDisable,
-  CanDisableRipple,
+  CanDisable, CanDisableCtor,
+  CanDisableRipple, CanDisableRippleCtor,
   mixinDisabled,
-  mixinDisableRipple
+  mixinDisableRipple,
 } from '@angular/material/core';
-import {Subject} from 'rxjs/Subject';
+import {Subject} from 'rxjs';
 import {DOCUMENT} from '@angular/common';
+import {MAT_MENU_PANEL, MatMenuPanel} from './menu-panel';
 
 // Boilerplate for applying mixins to MatMenuItem.
 /** @docs-private */
 export class MatMenuItemBase {}
-export const _MatMenuItemMixinBase = mixinDisableRipple(mixinDisabled(MatMenuItemBase));
+export const _MatMenuItemMixinBase: CanDisableRippleCtor & CanDisableCtor & typeof MatMenuItemBase =
+    mixinDisableRipple(mixinDisabled(MatMenuItemBase));
 
 /**
  * This directive is intended to be used inside an mat-menu tag.
@@ -39,7 +43,7 @@ export const _MatMenuItemMixinBase = mixinDisableRipple(mixinDisabled(MatMenuIte
   exportAs: 'matMenuItem',
   inputs: ['disabled', 'disableRipple'],
   host: {
-    'role': 'menuitem',
+    '[attr.role]': 'role',
     'class': 'mat-menu-item',
     '[class.mat-menu-item-highlighted]': '_highlighted',
     '[class.mat-menu-item-submenu-trigger]': '_triggersSubmenu',
@@ -47,15 +51,17 @@ export const _MatMenuItemMixinBase = mixinDisableRipple(mixinDisabled(MatMenuIte
     '[attr.aria-disabled]': 'disabled.toString()',
     '[attr.disabled]': 'disabled || null',
     '(click)': '_checkDisabled($event)',
-    '(mouseenter)': '_emitHoverEvent()',
+    '(mouseenter)': '_handleMouseEnter()',
   },
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   templateUrl: 'menu-item.html',
 })
 export class MatMenuItem extends _MatMenuItemMixinBase
     implements FocusableOption, CanDisable, CanDisableRipple, OnDestroy {
+
+  /** ARIA role for the menu item. */
+  @Input() role: 'menuitem' | 'menuitemradio' | 'menuitemcheckbox' = 'menuitem';
 
   private _document: Document;
 
@@ -69,18 +75,23 @@ export class MatMenuItem extends _MatMenuItemMixinBase
   _triggersSubmenu: boolean = false;
 
   constructor(
-    private _elementRef: ElementRef,
+    private _elementRef: ElementRef<HTMLElement>,
     @Inject(DOCUMENT) document?: any,
-    private _focusMonitor?: FocusMonitor) {
+    private _focusMonitor?: FocusMonitor,
+    @Inject(MAT_MENU_PANEL) @Optional() private _parentMenu?: MatMenuPanel<MatMenuItem>) {
 
-    // @deletion-target 6.0.0 make `_focusMonitor` and `document` required params.
+    // @breaking-change 8.0.0 make `_focusMonitor` and `document` required params.
     super();
 
     if (_focusMonitor) {
       // Start monitoring the element so it gets the appropriate focused classes. We want
       // to show the focus style for menu items only when the focus was not caused by a
       // mouse or touch interaction.
-      _focusMonitor.monitor(this._getHostElement(), false);
+      _focusMonitor.monitor(this._elementRef, false);
+    }
+
+    if (_parentMenu && _parentMenu.addItem) {
+      _parentMenu.addItem(this);
     }
 
     this._document = document;
@@ -97,7 +108,11 @@ export class MatMenuItem extends _MatMenuItemMixinBase
 
   ngOnDestroy() {
     if (this._focusMonitor) {
-      this._focusMonitor.stopMonitoring(this._getHostElement());
+      this._focusMonitor.stopMonitoring(this._elementRef);
+    }
+
+    if (this._parentMenu && this._parentMenu.removeItem) {
+      this._parentMenu.removeItem(this);
     }
 
     this._hovered.complete();
@@ -122,10 +137,8 @@ export class MatMenuItem extends _MatMenuItemMixinBase
   }
 
   /** Emits to the hover stream. */
-  _emitHoverEvent() {
-    if (!this.disabled) {
-      this._hovered.next(this);
-    }
+  _handleMouseEnter() {
+    this._hovered.next(this);
   }
 
   /** Gets the label to be used when determining whether the option should be focused. */

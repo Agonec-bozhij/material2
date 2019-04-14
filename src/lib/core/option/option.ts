@@ -7,23 +7,24 @@
  */
 
 import {coerceBooleanProperty} from '@angular/cdk/coercion';
-import {ENTER, SPACE} from '@angular/cdk/keycodes';
-import {Subject} from 'rxjs/Subject';
+import {ENTER, SPACE, hasModifierKey} from '@angular/cdk/keycodes';
 import {
+  AfterViewChecked,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
   ElementRef,
   EventEmitter,
+  Inject,
+  InjectionToken,
   Input,
+  OnDestroy,
   Optional,
   Output,
   QueryList,
   ViewEncapsulation,
-  InjectionToken,
-  Inject,
-  AfterViewChecked,
 } from '@angular/core';
+import {Subject} from 'rxjs';
 import {MatOptgroup} from './optgroup';
 
 /**
@@ -71,7 +72,7 @@ export const MAT_OPTION_PARENT_COMPONENT =
     '[class.mat-option-multiple]': 'multiple',
     '[class.mat-active]': 'active',
     '[id]': 'id',
-    '[attr.aria-selected]': 'selected.toString()',
+    '[attr.aria-selected]': '_getAriaSelected()',
     '[attr.aria-disabled]': 'disabled.toString()',
     '[class.mat-option-disabled]': 'disabled',
     '(click)': '_selectViaInteraction()',
@@ -81,27 +82,25 @@ export const MAT_OPTION_PARENT_COMPONENT =
   styleUrls: ['option.css'],
   templateUrl: 'option.html',
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class MatOption implements AfterViewChecked {
+export class MatOption implements AfterViewChecked, OnDestroy {
   private _selected = false;
   private _active = false;
   private _disabled = false;
-  private _id = `mat-option-${_uniqueIdCounter++}`;
   private _mostRecentViewValue = '';
 
   /** Whether the wrapping component is in multiple selection mode. */
   get multiple() { return this._parent && this._parent.multiple; }
-
-  /** The unique ID of the option. */
-  get id(): string { return this._id; }
 
   /** Whether or not the option is currently selected. */
   get selected(): boolean { return this._selected; }
 
   /** The form value of the option. */
   @Input() value: any;
+
+  /** The unique ID of the option. */
+  @Input() id: string = `mat-option-${_uniqueIdCounter++}`;
 
   /** Whether the option is disabled. */
   @Input()
@@ -112,13 +111,14 @@ export class MatOption implements AfterViewChecked {
   get disableRipple() { return this._parent && this._parent.disableRipple; }
 
   /** Event emitted when the option is selected or deselected. */
+  // tslint:disable-next-line:no-output-on-prefix
   @Output() readonly onSelectionChange = new EventEmitter<MatOptionSelectionChange>();
 
   /** Emits when the state of the option changes and any parents have to be notified. */
   readonly _stateChanges = new Subject<void>();
 
   constructor(
-    private _element: ElementRef,
+    private _element: ElementRef<HTMLElement>,
     private _changeDetectorRef: ChangeDetectorRef,
     @Optional() @Inject(MAT_OPTION_PARENT_COMPONENT) private _parent: MatOptionParentComponent,
     @Optional() readonly group: MatOptgroup) {}
@@ -144,16 +144,20 @@ export class MatOption implements AfterViewChecked {
 
   /** Selects the option. */
   select(): void {
-    this._selected = true;
-    this._changeDetectorRef.markForCheck();
-    this._emitSelectionChangeEvent();
+    if (!this._selected) {
+      this._selected = true;
+      this._changeDetectorRef.markForCheck();
+      this._emitSelectionChangeEvent();
+    }
   }
 
   /** Deselects the option. */
   deselect(): void {
-    this._selected = false;
-    this._changeDetectorRef.markForCheck();
-    this._emitSelectionChangeEvent();
+    if (this._selected) {
+      this._selected = false;
+      this._changeDetectorRef.markForCheck();
+      this._emitSelectionChangeEvent();
+    }
   }
 
   /** Sets focus onto this option. */
@@ -196,7 +200,7 @@ export class MatOption implements AfterViewChecked {
 
   /** Ensures the option is selected when activated from the keyboard. */
   _handleKeydown(event: KeyboardEvent): void {
-    if (event.keyCode === ENTER || event.keyCode === SPACE) {
+    if ((event.keyCode === ENTER || event.keyCode === SPACE) && !hasModifierKey(event)) {
       this._selectViaInteraction();
 
       // Prevent the page from scrolling down and form submits.
@@ -214,6 +218,16 @@ export class MatOption implements AfterViewChecked {
       this._changeDetectorRef.markForCheck();
       this._emitSelectionChangeEvent(true);
     }
+  }
+
+  /**
+   * Gets the `aria-selected` value for the option. We explicitly omit the `aria-selected`
+   * attribute from single-selection, unselected options. Including the `aria-selected="false"`
+   * attributes adds a significant amount of noise to screen-reader users without providing useful
+   * information.
+   */
+  _getAriaSelected(): boolean|null {
+    return this.selected || (this.multiple ? false : null);
   }
 
   /** Returns the correct tabindex for the option depending on disabled state. */
@@ -242,35 +256,63 @@ export class MatOption implements AfterViewChecked {
     }
   }
 
+  ngOnDestroy() {
+    this._stateChanges.complete();
+  }
+
   /** Emits the selection change event. */
   private _emitSelectionChangeEvent(isUserInput = false): void {
     this.onSelectionChange.emit(new MatOptionSelectionChange(this, isUserInput));
   }
+}
 
-  /**
-   * Counts the amount of option group labels that precede the specified option.
-   * @param optionIndex Index of the option at which to start counting.
-   * @param options Flat list of all of the options.
-   * @param optionGroups Flat list of all of the option groups.
-   */
-  static countGroupLabelsBeforeOption(optionIndex: number, options: QueryList<MatOption>,
-    optionGroups: QueryList<MatOptgroup>): number {
+/**
+ * Counts the amount of option group labels that precede the specified option.
+ * @param optionIndex Index of the option at which to start counting.
+ * @param options Flat list of all of the options.
+ * @param optionGroups Flat list of all of the option groups.
+ * @docs-private
+ */
+export function _countGroupLabelsBeforeOption(optionIndex: number, options: QueryList<MatOption>,
+  optionGroups: QueryList<MatOptgroup>): number {
 
-    if (optionGroups.length) {
-      let optionsArray = options.toArray();
-      let groups = optionGroups.toArray();
-      let groupCounter = 0;
+  if (optionGroups.length) {
+    let optionsArray = options.toArray();
+    let groups = optionGroups.toArray();
+    let groupCounter = 0;
 
-      for (let i = 0; i < optionIndex + 1; i++) {
-        if (optionsArray[i].group && optionsArray[i].group === groups[groupCounter]) {
-          groupCounter++;
-        }
+    for (let i = 0; i < optionIndex + 1; i++) {
+      if (optionsArray[i].group && optionsArray[i].group === groups[groupCounter]) {
+        groupCounter++;
       }
-
-      return groupCounter;
     }
 
-    return 0;
+    return groupCounter;
   }
 
+  return 0;
 }
+
+/**
+ * Determines the position to which to scroll a panel in order for an option to be into view.
+ * @param optionIndex Index of the option to be scrolled into the view.
+ * @param optionHeight Height of the options.
+ * @param currentScrollPosition Current scroll position of the panel.
+ * @param panelHeight Height of the panel.
+ * @docs-private
+ */
+export function _getOptionScrollPosition(optionIndex: number, optionHeight: number,
+    currentScrollPosition: number, panelHeight: number): number {
+  const optionOffset = optionIndex * optionHeight;
+
+  if (optionOffset < currentScrollPosition) {
+    return optionOffset;
+  }
+
+  if (optionOffset + optionHeight > currentScrollPosition + panelHeight) {
+    return Math.max(0, optionOffset - panelHeight + optionHeight);
+  }
+
+  return currentScrollPosition;
+}
+

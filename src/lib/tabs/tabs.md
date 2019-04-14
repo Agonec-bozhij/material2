@@ -6,7 +6,7 @@ of the header, pagination controls appear to let the user scroll left and right 
 The active tab may be set using the `selectedIndex` input or when the user selects one of the
 tab labels in the header.
 
-<!-- example(tabs-overview) -->
+<!-- example(tab-group-basic) -->
 
 ### Events
 
@@ -80,12 +80,53 @@ The `tab-nav-bar` is not tied to any particular router; it works with normal `<a
 the `active` property to determine which tab is currently active. The corresponding
 `<router-outlet>` can be placed anywhere in the view.
 
+### Lazy Loading
+By default, the tab contents are eagerly loaded. Eagerly loaded tabs
+will initalize the child components but not inject them into the DOM
+until the tab is activated.
+
+
+If the tab contains several complex child components or the tab's contents
+rely on DOM calculations during initialization, it is advised
+to lazy load the tab's content.
+
+Tab contents can be lazy loaded by declaring the body in a `ng-template`
+with the `matTabContent` attribute.
+
+```html
+<mat-tab-group>
+  <mat-tab label="First">
+    <ng-template matTabContent>
+      The First Content
+    </ng-template>
+  </mat-tab>
+  <mat-tab label="Second">
+    <ng-template matTabContent>
+      The Second Content
+    </ng-template>
+  </mat-tab>
+</mat-tab-group>
+```
+
+### Label alignment
+If you want to align the tab labels in the center or towards the end of the container, you can
+do so using the `[mat-align-tabs]` attribute.
+
+<!-- example(tab-group-align) -->
+
+### Controlling the tab animation
+You can control the duration of the tabs' animation using the `animationDuration` input. If you
+want to disable the animation completely, you can do so by setting the properties to `0ms`. The
+duration can be configured globally using the `MAT_TABS_CONFIG` injection token.
+
+<!-- example(tab-group-animations) -->
+
 ### Accessibility
 Tabs without text or labels should be given a meaningful label via `aria-label` or
 `aria-labelledby`. For `MatTabNav`, the `<nav>` element should have a label as well.
 
 
-#### Keyboard shortcuts
+#### Keyboard interaction
 
 | Shortcut             | Action                     |
 |----------------------|----------------------------|
@@ -93,5 +134,4 @@ Tabs without text or labels should be given a meaningful label via `aria-label` 
 | `RIGHT_ARROW`        | Move focus to next tab     |
 | `HOME`               | Move focus to first tab    |
 | `END`                | Move focus to last tab     |
-| `RIGHT_ARROW`        | Move focus to next tab     |
 | `SPACE` or `ENTER`   | Switch to focused tab      |

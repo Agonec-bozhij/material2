@@ -1,28 +1,35 @@
 import {Directionality} from '@angular/cdk/bidi';
 import {BACKSPACE, DELETE, SPACE} from '@angular/cdk/keycodes';
-import {createKeyboardEvent} from '@angular/cdk/testing';
-import {Component, DebugElement} from '@angular/core';
+import {createKeyboardEvent, dispatchFakeEvent} from '@angular/cdk/testing';
+import {Component, DebugElement, ViewChild} from '@angular/core';
 import {async, ComponentFixture, TestBed} from '@angular/core/testing';
+import {MAT_RIPPLE_GLOBAL_OPTIONS, RippleGlobalOptions} from '@angular/material/core';
 import {By} from '@angular/platform-browser';
-import {MatChip, MatChipEvent, MatChipList, MatChipSelectionChange, MatChipsModule} from './index';
+import {Subject} from 'rxjs';
+import {MatChip, MatChipEvent, MatChipSelectionChange, MatChipsModule, MatChipList} from './index';
 
 
 describe('Chips', () => {
   let fixture: ComponentFixture<any>;
   let chipDebugElement: DebugElement;
-  let chipListNativeElement: HTMLElement;
   let chipNativeElement: HTMLElement;
   let chipInstance: MatChip;
+  let globalRippleOptions: RippleGlobalOptions;
 
   let dir = 'ltr';
 
   beforeEach(async(() => {
+    globalRippleOptions = {};
     TestBed.configureTestingModule({
       imports: [MatChipsModule],
       declarations: [BasicChip, SingleChip],
-      providers: [{
-        provide: Directionality, useFactory: () => ({value: dir})
-      }]
+      providers: [
+        {provide: MAT_RIPPLE_GLOBAL_OPTIONS, useFactory: () => globalRippleOptions},
+        {provide: Directionality, useFactory: () => ({
+          value: dir,
+          change: new Subject()
+        })},
+      ]
     });
 
     TestBed.compileComponents();
@@ -36,7 +43,7 @@ describe('Chips', () => {
 
       chipDebugElement = fixture.debugElement.query(By.directive(MatChip));
       chipNativeElement = chipDebugElement.nativeElement;
-      chipInstance = chipDebugElement.injector.get(MatChip);
+      chipInstance = chipDebugElement.injector.get<MatChip>(MatChip);
 
       document.body.appendChild(chipNativeElement);
     });
@@ -59,9 +66,8 @@ describe('Chips', () => {
       fixture.detectChanges();
 
       chipDebugElement = fixture.debugElement.query(By.directive(MatChip));
-      chipListNativeElement = fixture.debugElement.query(By.directive(MatChipList)).nativeElement;
       chipNativeElement = chipDebugElement.nativeElement;
-      chipInstance = chipDebugElement.injector.get(MatChip);
+      chipInstance = chipDebugElement.injector.get<MatChip>(MatChip);
       testComponent = fixture.debugElement.componentInstance;
 
       document.body.appendChild(chipNativeElement);
@@ -81,12 +87,17 @@ describe('Chips', () => {
         expect(chipNativeElement.classList).not.toContain('mat-basic-chip');
       });
 
-      it('emits focus on click', () => {
-        spyOn(chipInstance, 'focus').and.callThrough();
+      it('emits focus only once for multiple clicks', () => {
+        let counter = 0;
+        chipInstance._onFocus.subscribe(() => {
+          counter ++ ;
+        });
 
-        chipNativeElement.click();
+        chipNativeElement.focus();
+        chipNativeElement.focus();
+        fixture.detectChanges();
 
-        expect(chipInstance.focus).toHaveBeenCalledTimes(1);
+        expect(counter).toBe(1);
       });
 
       it('emits destroy on destruction', () => {
@@ -128,6 +139,80 @@ describe('Chips', () => {
         fixture.detectChanges();
 
         expect(testComponent.chipRemove).toHaveBeenCalledWith({chip: chipInstance});
+      });
+
+      it('should not prevent the default click action', () => {
+        const event = dispatchFakeEvent(chipNativeElement, 'click');
+        fixture.detectChanges();
+
+        expect(event.defaultPrevented).toBe(false);
+      });
+
+      it('should prevent the default click action when the chip is disabled', () => {
+        chipInstance.disabled = true;
+        fixture.detectChanges();
+
+        const event = dispatchFakeEvent(chipNativeElement, 'click');
+        fixture.detectChanges();
+
+        expect(event.defaultPrevented).toBe(true);
+      });
+
+      it('should not dispatch `selectionChange` event when deselecting a non-selected chip', () => {
+        chipInstance.deselect();
+
+        const spy = jasmine.createSpy('selectionChange spy');
+        const subscription = chipInstance.selectionChange.subscribe(spy);
+
+        chipInstance.deselect();
+
+        expect(spy).not.toHaveBeenCalled();
+        subscription.unsubscribe();
+      });
+
+      it('should not dispatch `selectionChange` event when selecting a selected chip', () => {
+        chipInstance.select();
+
+        const spy = jasmine.createSpy('selectionChange spy');
+        const subscription = chipInstance.selectionChange.subscribe(spy);
+
+        chipInstance.select();
+
+        expect(spy).not.toHaveBeenCalled();
+        subscription.unsubscribe();
+      });
+
+      it('should not dispatch `selectionChange` event when selecting a selected chip via ' +
+        'user interaction', () => {
+          chipInstance.select();
+
+          const spy = jasmine.createSpy('selectionChange spy');
+          const subscription = chipInstance.selectionChange.subscribe(spy);
+
+          chipInstance.selectViaInteraction();
+
+          expect(spy).not.toHaveBeenCalled();
+          subscription.unsubscribe();
+        });
+
+      it('should not dispatch `selectionChange` through setter if the value did not change', () => {
+        chipInstance.selected = false;
+
+        const spy = jasmine.createSpy('selectionChange spy');
+        const subscription = chipInstance.selectionChange.subscribe(spy);
+
+        chipInstance.selected = false;
+
+        expect(spy).not.toHaveBeenCalled();
+        subscription.unsubscribe();
+      });
+
+      it('should be able to disable ripples through ripple global options at runtime', () => {
+        expect(chipInstance.rippleDisabled).toBe(false, 'Expected chip ripples to be enabled.');
+
+        globalRippleOptions.disabled = true;
+
+        expect(chipInstance.rippleDisabled).toBe(true, 'Expected chip ripples to be disabled.');
       });
     });
 
@@ -172,7 +257,19 @@ describe('Chips', () => {
           expect(testComponent.chipSelectionChange).toHaveBeenCalledWith(CHIP_DESELECTED_EVENT);
         });
 
-        it('should have correct aria-selected', () => {
+        it('should have correct aria-selected in single selection mode', () => {
+          expect(chipNativeElement.hasAttribute('aria-selected')).toBe(false);
+
+          testComponent.selected = true;
+          fixture.detectChanges();
+
+          expect(chipNativeElement.getAttribute('aria-selected')).toBe('true');
+        });
+
+        it('should have the correct aria-selected in multi-selection mode', () => {
+          testComponent.chipList.multiple = true;
+          fixture.detectChanges();
+
           expect(chipNativeElement.getAttribute('aria-selected')).toBe('false');
 
           testComponent.selected = true;
@@ -180,6 +277,7 @@ describe('Chips', () => {
 
           expect(chipNativeElement.getAttribute('aria-selected')).toBe('true');
         });
+
       });
 
       describe('when selectable is false', () => {
@@ -212,7 +310,7 @@ describe('Chips', () => {
           fixture.detectChanges();
         });
 
-        it('DELETE emits the (remove) event', () => {
+        it('DELETE emits the (removed) event', () => {
           const DELETE_EVENT = createKeyboardEvent('keydown', DELETE) as KeyboardEvent;
 
           spyOn(testComponent, 'chipRemove');
@@ -224,7 +322,7 @@ describe('Chips', () => {
           expect(testComponent.chipRemove).toHaveBeenCalled();
         });
 
-        it('BACKSPACE emits the (remove) event', () => {
+        it('BACKSPACE emits the (removed) event', () => {
           const BACKSPACE_EVENT = createKeyboardEvent('keydown', BACKSPACE) as KeyboardEvent;
 
           spyOn(testComponent, 'chipRemove');
@@ -243,7 +341,7 @@ describe('Chips', () => {
           fixture.detectChanges();
         });
 
-        it('DELETE does not emit the (remove) event', () => {
+        it('DELETE does not emit the (removed) event', () => {
           const DELETE_EVENT = createKeyboardEvent('keydown', DELETE) as KeyboardEvent;
 
           spyOn(testComponent, 'chipRemove');
@@ -255,7 +353,7 @@ describe('Chips', () => {
           expect(testComponent.chipRemove).not.toHaveBeenCalled();
         });
 
-        it('BACKSPACE does not emit the (remove) event', () => {
+        it('BACKSPACE does not emit the (removed) event', () => {
           const BACKSPACE_EVENT = createKeyboardEvent('keydown', BACKSPACE) as KeyboardEvent;
 
           spyOn(testComponent, 'chipRemove');
@@ -305,6 +403,7 @@ describe('Chips', () => {
     </mat-chip-list>`
 })
 class SingleChip {
+  @ViewChild(MatChipList, {static: false}) chipList: MatChipList;
   disabled: boolean = false;
   name: string = 'Test';
   color: string = 'primary';

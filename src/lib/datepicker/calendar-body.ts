@@ -9,12 +9,21 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   EventEmitter,
   Input,
   Output,
-  ViewEncapsulation
+  ViewEncapsulation,
+  NgZone,
+  OnChanges,
+  SimpleChanges,
 } from '@angular/core';
+import {take} from 'rxjs/operators';
 
+/**
+ * Extra CSS classes that can be associated with a calendar cell.
+ */
+export type MatCalendarCellCssClasses = string | string[] | Set<string> | {[key: string]: any};
 
 /**
  * An internal class that represents the data corresponding to a single calendar cell.
@@ -24,7 +33,8 @@ export class MatCalendarCell {
   constructor(public value: number,
               public displayValue: string,
               public ariaLabel: string,
-              public enabled: boolean) {}
+              public enabled: boolean,
+              public cssClasses?: MatCalendarCellCssClasses) {}
 }
 
 
@@ -40,14 +50,13 @@ export class MatCalendarCell {
   host: {
     'class': 'mat-calendar-body',
     'role': 'grid',
-    'attr.aria-readonly': 'true'
+    'aria-readonly': 'true'
   },
   exportAs: 'matCalendarBody',
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class MatCalendarBody {
+export class MatCalendarBody implements OnChanges {
   /** The label for the table. (e.g. "Jan 2017"). */
   @Input() label: string;
 
@@ -66,9 +75,6 @@ export class MatCalendarBody {
   /** The number of columns in the table. */
   @Input() numCols = 7;
 
-  /** Whether to allow selection of disabled cells. */
-  @Input() allowDisabledSelection = false;
-
   /** The cell number of the active cell in the table. */
   @Input() activeCell = 0;
 
@@ -81,17 +87,38 @@ export class MatCalendarBody {
   /** Emits when a new value is selected. */
   @Output() readonly selectedValueChange: EventEmitter<number> = new EventEmitter<number>();
 
+  /** The number of blank cells to put at the beginning for the first row. */
+  _firstRowOffset: number;
+
+  /** Padding for the individual date cells. */
+  _cellPadding: string;
+
+  /** Width of an individual cell. */
+  _cellWidth: string;
+
+  constructor(private _elementRef: ElementRef<HTMLElement>, private _ngZone: NgZone) { }
+
   _cellClicked(cell: MatCalendarCell): void {
-    if (!this.allowDisabledSelection && !cell.enabled) {
-      return;
+    if (cell.enabled) {
+      this.selectedValueChange.emit(cell.value);
     }
-    this.selectedValueChange.emit(cell.value);
   }
 
-  /** The number of blank cells to put at the beginning for the first row. */
-  get _firstRowOffset(): number {
-    return this.rows && this.rows.length && this.rows[0].length ?
-        this.numCols - this.rows[0].length : 0;
+  ngOnChanges(changes: SimpleChanges) {
+    const columnChanges = changes['numCols'];
+    const {rows, numCols} = this;
+
+    if (changes['rows'] || columnChanges) {
+      this._firstRowOffset = rows && rows.length && rows[0].length ? numCols - rows[0].length : 0;
+    }
+
+    if (changes['cellAspectRatio'] || columnChanges || !this._cellPadding) {
+      this._cellPadding = `${50 * this.cellAspectRatio / numCols}%`;
+    }
+
+    if (columnChanges || !this._cellWidth) {
+      this._cellWidth = `${100 / numCols}%`;
+    }
   }
 
   _isActiveCell(rowIndex: number, colIndex: number): boolean {
@@ -103,5 +130,19 @@ export class MatCalendarBody {
     }
 
     return cellNumber == this.activeCell;
+  }
+
+  /** Focuses the active cell after the microtask queue is empty. */
+  _focusActiveCell() {
+    this._ngZone.runOutsideAngular(() => {
+      this._ngZone.onStable.asObservable().pipe(take(1)).subscribe(() => {
+        const activeCell: HTMLElement | null =
+            this._elementRef.nativeElement.querySelector('.mat-calendar-body-active');
+
+        if (activeCell) {
+          activeCell.focus();
+        }
+      });
+    });
   }
 }

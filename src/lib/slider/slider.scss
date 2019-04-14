@@ -1,5 +1,6 @@
 @import '../core/style/variables';
 @import '../core/style/vendor-prefixes';
+@import '../../cdk/a11y/a11y';
 
 
 // This refers to the thickness of the slider. On a horizontal slider this is the height, on a
@@ -93,8 +94,8 @@ $mat-slider-focus-ring-size: 30px !default;
               background-color $swift-ease-out-duration $swift-ease-out-timing-function,
               opacity $swift-ease-out-duration $swift-ease-out-timing-function;
 
-  .cdk-keyboard-focused &,
-  .cdk-program-focused & {
+  .mat-slider.cdk-keyboard-focused &,
+  .mat-slider.cdk-program-focused & {
     transform: scale(1);
     opacity: 1;
   }
@@ -141,6 +142,10 @@ $mat-slider-focus-ring-size: 30px !default;
   transition: transform $swift-ease-out-duration $swift-ease-out-timing-function,
               border-radius  $swift-ease-out-duration $swift-ease-out-timing-function,
               background-color  $swift-ease-out-duration $swift-ease-out-timing-function;
+
+  @include cdk-high-contrast {
+    outline: solid 1px;
+  }
 }
 
 .mat-slider-thumb-label-text {
@@ -192,8 +197,7 @@ $mat-slider-focus-ring-size: 30px !default;
 // Slider with thumb label.
 .mat-slider-thumb-label-showing {
   .mat-slider-focus-ring {
-    transform: scale(0);
-    opacity: 0;
+    display: none;
   }
 
   .mat-slider-thumb-label {
@@ -298,6 +302,12 @@ $mat-slider-focus-ring-size: 30px !default;
   .mat-slider-ticks-container {
     height: $mat-slider-track-thickness;
     width: 100%;
+
+    @include cdk-high-contrast {
+      height: 0;
+      outline: solid $mat-slider-track-thickness;
+      top: $mat-slider-track-thickness / 2;
+    }
   }
 
   .mat-slider-ticks {
@@ -331,6 +341,13 @@ $mat-slider-focus-ring-size: 30px !default;
   &.cdk-focused {
     .mat-slider-thumb-label {
       transform: rotate(45deg);
+    }
+
+    @include cdk-high-contrast {
+      .mat-slider-thumb-label,
+      .mat-slider-thumb-label-text {
+        transform: none;
+      }
     }
   }
 }
@@ -375,6 +392,12 @@ $mat-slider-focus-ring-size: 30px !default;
   .mat-slider-ticks-container {
     width: $mat-slider-track-thickness;
     height: 100%;
+
+    @include cdk-high-contrast {
+      width: 0;
+      outline: solid $mat-slider-track-thickness;
+      left: $mat-slider-track-thickness / 2;
+    }
   }
 
   .mat-slider-focus-ring {
@@ -442,5 +465,20 @@ $mat-slider-focus-ring-size: 30px !default;
         transform-origin: 100% 100%;
       }
     }
+  }
+}
+
+// Slider inside a component with disabled animations.
+.mat-slider._mat-animation-noopable {
+  .mat-slider-track-fill,
+  .mat-slider-track-background,
+  .mat-slider-ticks,
+  .mat-slider-thumb-container,
+  .mat-slider-focus-ring,
+  .mat-slider-thumb,
+  .mat-slider-thumb-label,
+  .mat-slider-thumb-label-text,
+  .mat-slider-has-ticks .mat-slider-wrapper::after {
+    transition: none;
   }
 }

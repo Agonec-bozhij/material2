@@ -1,13 +1,8 @@
-import {Component, OnInit, ViewChild} from '@angular/core';
 import {HttpClient} from '@angular/common/http';
-import {MatPaginator, MatSort, MatTableDataSource} from '@angular/material';
-import {Observable} from 'rxjs/Observable';
-import {merge} from 'rxjs/observable/merge';
-import {of as observableOf} from 'rxjs/observable/of';
-import {catchError} from 'rxjs/operators/catchError';
-import {map} from 'rxjs/operators/map';
-import {startWith} from 'rxjs/operators/startWith';
-import {switchMap} from 'rxjs/operators/switchMap';
+import {Component, ViewChild, AfterViewInit} from '@angular/core';
+import {MatPaginator, MatSort} from '@angular/material';
+import {merge, Observable, of as observableOf} from 'rxjs';
+import {catchError, map, startWith, switchMap} from 'rxjs/operators';
 
 /**
  * @title Table retrieving data through HTTP
@@ -17,22 +12,22 @@ import {switchMap} from 'rxjs/operators/switchMap';
   styleUrls: ['table-http-example.css'],
   templateUrl: 'table-http-example.html',
 })
-export class TableHttpExample implements OnInit {
-  displayedColumns = ['created', 'state', 'number', 'title'];
-  exampleDatabase: ExampleHttpDao | null;
-  dataSource = new MatTableDataSource();
+export class TableHttpExample implements AfterViewInit {
+  displayedColumns: string[] = ['created', 'state', 'number', 'title'];
+  exampleDatabase: ExampleHttpDatabase | null;
+  data: GithubIssue[] = [];
 
   resultsLength = 0;
   isLoadingResults = true;
   isRateLimitReached = false;
 
-  @ViewChild(MatPaginator) paginator: MatPaginator;
-  @ViewChild(MatSort) sort: MatSort;
+  @ViewChild(MatPaginator, {static: false}) paginator: MatPaginator;
+  @ViewChild(MatSort, {static: false}) sort: MatSort;
 
   constructor(private http: HttpClient) {}
 
-  ngOnInit() {
-    this.exampleDatabase = new ExampleHttpDao(this.http);
+  ngAfterViewInit() {
+    this.exampleDatabase = new ExampleHttpDatabase(this.http);
 
     // If the user changes the sort order, reset back to the first page.
     this.sort.sortChange.subscribe(() => this.paginator.pageIndex = 0);
@@ -59,7 +54,7 @@ export class TableHttpExample implements OnInit {
           this.isRateLimitReached = true;
           return observableOf([]);
         })
-      ).subscribe(data => this.dataSource.data = data);
+      ).subscribe(data => this.data = data);
   }
 }
 
@@ -76,7 +71,7 @@ export interface GithubIssue {
 }
 
 /** An example database that the data source uses to retrieve data for the table. */
-export class ExampleHttpDao {
+export class ExampleHttpDatabase {
   constructor(private http: HttpClient) {}
 
   getRepoIssues(sort: string, order: string, page: number): Observable<GithubApi> {

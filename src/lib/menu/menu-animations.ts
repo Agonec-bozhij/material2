@@ -12,6 +12,8 @@ import{
   style,
   animate,
   transition,
+  query,
+  group,
   AnimationTriggerMetadata,
 } from '@angular/animations';
 
@@ -19,6 +21,7 @@ import{
  * Animations used by the mat-menu component.
  * Animation duration and timing values are based on:
  * https://material.io/guidelines/components/menus.html#menus-usage
+ * @docs-private
  */
 export const matMenuAnimations: {
   readonly transformMenu: AnimationTriggerMetadata;
@@ -33,23 +36,15 @@ export const matMenuAnimations: {
    * delay to display the ripple.
    */
   transformMenu: trigger('transformMenu', [
-    // TODO(kara): switch to :enter and :leave once Mobile Safari is sorted out.
     state('void', style({
       opacity: 0,
-      // This starts off from 0.01, instead of 0, because there's an issue in the Angular animations
-      // as of 4.2, which causes the animation to be skipped if it starts from 0.
-      transform: 'scale(0.01, 0.01)'
+      transform: 'scale(0.8)'
     })),
-    state('enter-start', style({
-      opacity: 1,
-      transform: 'scale(1, 0.5)'
-    })),
-    state('enter', style({
-      transform: 'scale(1, 1)'
-    })),
-    transition('void => enter-start', animate('100ms linear')),
-    transition('enter-start => enter', animate('300ms cubic-bezier(0.25, 0.8, 0.25, 1)')),
-    transition('* => void', animate('150ms 50ms linear', style({opacity: 0})))
+    transition('void => enter', group([
+      query('.mat-menu-content', animate('100ms linear', style({opacity: 1}))),
+      animate('120ms cubic-bezier(0, 0, 0.2, 1)', style({transform: 'scale(1)'})),
+    ])),
+    transition('* => void', animate('100ms 25ms linear', style({opacity: 0})))
   ]),
 
 
@@ -58,6 +53,8 @@ export const matMenuAnimations: {
    * after its containing element is scaled in.
    */
   fadeInItems: trigger('fadeInItems', [
+    // TODO(crisbeto): this is inside the `transformMenu`
+    // now. Remove next time we do breaking changes.
     state('showing', style({opacity: 1})),
     transition('void => *', [
       style({opacity: 0}),
@@ -68,12 +65,14 @@ export const matMenuAnimations: {
 
 /**
  * @deprecated
- * @deletion-target 7.0.0
+ * @breaking-change 8.0.0
+ * @docs-private
  */
 export const fadeInItems = matMenuAnimations.fadeInItems;
 
 /**
  * @deprecated
- * @deletion-target 7.0.0
+ * @breaking-change 8.0.0
+ * @docs-private
  */
 export const transformMenu = matMenuAnimations.transformMenu;

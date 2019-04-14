@@ -6,15 +6,17 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {ElementRef, Injectable, NgZone, Optional, SkipSelf, OnDestroy} from '@angular/core';
 import {Platform} from '@angular/cdk/platform';
-import {Subject} from 'rxjs/Subject';
-import {Subscription} from 'rxjs/Subscription';
-import {Observable} from 'rxjs/Observable';
-import {of as observableOf} from 'rxjs/observable/of';
-import {fromEvent} from 'rxjs/observable/fromEvent';
-import {auditTime} from 'rxjs/operators/auditTime';
-import {filter} from 'rxjs/operators/filter';
+import {
+  ElementRef,
+  Injectable,
+  NgZone,
+  OnDestroy,
+  Optional,
+  SkipSelf,
+} from '@angular/core';
+import {fromEvent, of as observableOf, Subject, Subscription, Observable, Observer} from 'rxjs';
+import {auditTime, filter} from 'rxjs/operators';
 import {CdkScrollable} from './scrollable';
 
 
@@ -25,7 +27,7 @@ export const DEFAULT_SCROLL_TIME = 20;
  * Service contained all registered Scrollable references and emits an event when any one of the
  * Scrollable references emit a scrolled event.
  */
-@Injectable()
+@Injectable({providedIn: 'root'})
 export class ScrollDispatcher implements OnDestroy {
   constructor(private _ngZone: NgZone, private _platform: Platform) { }
 
@@ -50,10 +52,10 @@ export class ScrollDispatcher implements OnDestroy {
    * @param scrollable Scrollable instance to be registered.
    */
   register(scrollable: CdkScrollable): void {
-    const scrollSubscription = scrollable.elementScrolled()
-        .subscribe(() => this._scrolled.next(scrollable));
-
-    this.scrollContainers.set(scrollable, scrollSubscription);
+    if (!this.scrollContainers.has(scrollable)) {
+      this.scrollContainers.set(scrollable, scrollable.elementScrolled()
+          .subscribe(() => this._scrolled.next(scrollable)));
+    }
   }
 
   /**
@@ -80,7 +82,11 @@ export class ScrollDispatcher implements OnDestroy {
    * to run the callback using `NgZone.run`.
    */
   scrolled(auditTimeInMs: number = DEFAULT_SCROLL_TIME): Observable<CdkScrollable|void> {
-    return this._platform.isBrowser ? Observable.create(observer => {
+    if (!this._platform.isBrowser) {
+      return observableOf<void>();
+    }
+
+    return new Observable((observer: Observer<CdkScrollable|void>) => {
       if (!this._globalSubscription) {
         this._addGlobalListener();
       }
@@ -101,12 +107,13 @@ export class ScrollDispatcher implements OnDestroy {
           this._removeGlobalListener();
         }
       };
-    }) : observableOf<void>();
+    });
   }
 
   ngOnDestroy() {
     this._removeGlobalListener();
     this.scrollContainers.forEach((_, container) => this.deregister(container));
+    this._scrolled.complete();
   }
 
   /**
@@ -138,14 +145,14 @@ export class ScrollDispatcher implements OnDestroy {
 
   /** Returns true if the element is contained within the provided Scrollable. */
   private _scrollableContainsElement(scrollable: CdkScrollable, elementRef: ElementRef): boolean {
-    let element = elementRef.nativeElement;
+    let element: HTMLElement | null = elementRef.nativeElement;
     let scrollableElement = scrollable.getElementRef().nativeElement;
 
     // Traverse through the element parents until we reach null, checking if any of the elements
     // are the scrollable's element.
     do {
       if (element == scrollableElement) { return true; }
-    } while (element = element.parentElement);
+    } while (element = element!.parentElement);
 
     return false;
   }
@@ -166,13 +173,14 @@ export class ScrollDispatcher implements OnDestroy {
   }
 }
 
-/** @docs-private */
+
+/** @docs-private @deprecated @breaking-change 8.0.0 */
 export function SCROLL_DISPATCHER_PROVIDER_FACTORY(
     parentDispatcher: ScrollDispatcher, ngZone: NgZone, platform: Platform) {
   return parentDispatcher || new ScrollDispatcher(ngZone, platform);
 }
 
-/** @docs-private */
+/** @docs-private @deprecated @breaking-change 8.0.0 */
 export const SCROLL_DISPATCHER_PROVIDER = {
   // If there is already a ScrollDispatcher available, use that. Otherwise, provide a new one.
   provide: ScrollDispatcher,

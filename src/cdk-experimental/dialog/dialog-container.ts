@@ -6,30 +6,32 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {
-  ElementRef,
-  HostBinding,
-  ViewChild,
-  ComponentRef,
-  EmbeddedViewRef,
-  ChangeDetectorRef,
-  Component,
-  Optional,
-  Inject,
-  ViewEncapsulation,
-  ChangeDetectionStrategy,
-} from '@angular/core';
-import {DOCUMENT} from '@angular/common';
-import {trigger, state, style, transition, animate, AnimationEvent} from '@angular/animations';
+import {animate, AnimationEvent, state, style, transition, trigger} from '@angular/animations';
+import {FocusTrapFactory} from '@angular/cdk/a11y';
 import {
   BasePortalOutlet,
-  PortalHostDirective,
   ComponentPortal,
+  PortalHostDirective,
   TemplatePortal
 } from '@angular/cdk/portal';
-import {FocusTrapFactory} from '@angular/cdk/a11y';
+import {DOCUMENT} from '@angular/common';
+import {
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  ComponentRef,
+  ElementRef,
+  EmbeddedViewRef,
+  HostBinding,
+  Inject,
+  OnDestroy,
+  Optional,
+  ViewChild,
+  ViewEncapsulation,
+} from '@angular/core';
+import {Subject} from 'rxjs';
+import {distinctUntilChanged} from 'rxjs/operators';
 import {DialogConfig} from './dialog-config';
-import {Subject} from 'rxjs/Subject';
 
 
 export function throwDialogContentAlreadyAttachedError() {
@@ -47,24 +49,30 @@ export function throwDialogContentAlreadyAttachedError() {
   templateUrl: './dialog-container.html',
   styleUrls: ['dialog-container.css'],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   // Using OnPush for dialogs caused some G3 sync issues. Disabled until we can track them down.
   // tslint:disable-next-line:validate-decorators
   changeDetection: ChangeDetectionStrategy.Default,
   animations: [
     trigger('dialog', [
-      state('enter', style({ opacity: 1 })),
-      state('exit, void', style({ opacity: 0 })),
-      transition('* => *', animate(225)),
+      state('enter', style({opacity: 1})),
+      state('exit, void', style({opacity: 0})),
+      transition('* => enter', animate('{{enterAnimationDuration}}')),
+      transition('* => exit, * => void', animate('{{exitAnimationDuration}}')),
     ])
   ],
   host: {
-    '[@dialog]': '_state',
+    '[@dialog]': `{
+      value: _state,
+      params: {
+        enterAnimationDuration: _config.enterAnimationDuration,
+        exitAnimationDuration: _config.exitAnimationDuration
+      }
+    }`,
     '(@dialog.start)': '_onAnimationStart($event)',
-    '(@dialog.done)': '_onAnimationDone($event)',
+    '(@dialog.done)': '_animationDone.next($event)',
   },
 })
-export class CdkDialogContainer extends BasePortalOutlet {
+export class CdkDialogContainer extends BasePortalOutlet implements OnDestroy {
   /** State of the dialog animation. */
   _state: 'void' | 'enter' | 'exit' = 'enter';
 
@@ -81,15 +89,15 @@ export class CdkDialogContainer extends BasePortalOutlet {
   @HostBinding('attr.aria-label') get _ariaLabel() { return this._config.ariaLabel || null; }
 
   @HostBinding('attr.aria-describedby')
-  get _ariaDescribedBy() { return this._config ? this._config.ariaDescribedBy : null; }
+  get _ariaDescribedBy() { return this._config.ariaDescribedBy; }
 
-  @HostBinding('attr.role') get _role() { return this._config ? this._config.role : null; }
+  @HostBinding('attr.role') get _role() { return this._config.role; }
 
   @HostBinding('attr.tabindex') get _tabindex() { return -1; }
   // tslint:disable:no-host-decorator-in-concrete
 
   /** The portal host inside of this container into which the dialog content will be loaded. */
-  @ViewChild(PortalHostDirective) _portalHost: PortalHostDirective;
+  @ViewChild(PortalHostDirective, {static: true}) _portalHost: PortalHostDirective;
 
   /** A subject emitting before the dialog enters the view. */
   _beforeEnter: Subject<void> = new Subject();
@@ -103,20 +111,43 @@ export class CdkDialogContainer extends BasePortalOutlet {
   /** A subject emitting after the dialog exits the view. */
   _afterExit: Subject<void> = new Subject();
 
-  /** The dialog configuration. */
-  _config: DialogConfig;
+  /** Stream of animation `done` events. */
+  _animationDone = new Subject<AnimationEvent>();
 
   constructor(
-    private _elementRef: ElementRef,
+    private _elementRef: ElementRef<HTMLElement>,
     private _focusTrapFactory: FocusTrapFactory,
     private _changeDetectorRef: ChangeDetectorRef,
-    @Optional() @Inject(DOCUMENT) private _document: any) {
+    @Optional() @Inject(DOCUMENT) private _document: any,
+    /** The dialog configuration. */
+    public _config: DialogConfig) {
     super();
+
+    // We use a Subject with a distinctUntilChanged, rather than a callback attached to .done,
+    // because some browsers fire the done event twice and we don't want to emit duplicate events.
+    // See: https://github.com/angular/angular/issues/24084
+    this._animationDone.pipe(distinctUntilChanged((x, y) => {
+      return x.fromState === y.fromState && x.toState === y.toState;
+    })).subscribe(event => {
+      // Emit lifecycle events based on animation `done` callback.
+      if (event.toState === 'enter') {
+        this._autoFocusFirstTabbableElement();
+        this._afterEnter.next();
+        this._afterEnter.complete();
+      }
+
+      if (event.fromState === 'enter' && (event.toState === 'void' || event.toState === 'exit')) {
+        this._returnFocusAfterDialog();
+        this._afterExit.next();
+        this._afterExit.complete();
+      }
+    });
   }
 
   /** Destroy focus trap to place focus back to the element focused before the dialog opened. */
   ngOnDestroy() {
     this._focusTrap.destroy();
+    this._animationDone.complete();
   }
 
   /**
@@ -149,21 +180,11 @@ export class CdkDialogContainer extends BasePortalOutlet {
   _onAnimationStart(event: AnimationEvent) {
     if (event.toState === 'enter') {
       this._beforeEnter.next();
+      this._beforeEnter.complete();
     }
-    if (event.toState === 'void' || event.toState === 'exit') {
+    if (event.fromState === 'enter' && (event.toState === 'void' || event.toState === 'exit')) {
       this._beforeExit.next();
-    }
-  }
-
-  /** Emit lifecycle events based on animation `done` callback. */
-  _onAnimationDone(event: AnimationEvent) {
-    if (event.toState === 'enter') {
-      this._autoFocusFirstTabbableElement();
-      this._afterEnter.next();
-    }
-    if (event.toState === 'void' || event.toState === 'exit') {
-      this._returnFocusAfterDialog();
-      this._afterExit.next();
+      this._beforeExit.complete();
     }
   }
 

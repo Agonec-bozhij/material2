@@ -1,4 +1,4 @@
-`<mat-slider>` allows for the selection of a value from a range via mouse, touch, or keyboard, 
+`<mat-slider>` allows for the selection of a value from a range via mouse, touch, or keyboard,
 similar to `<input type="range">`.
 
 <!-- example(slider-overview) -->
@@ -27,7 +27,7 @@ on bottom and the maximum value on top.
 
 An `invert` attribute is also available which can be specified to flip the axis that the thumb moves
 along. An inverted horizontal slider will have the minimum value on the right and the maximum value
-on the left, while an inverted vertical slider will have the minimum value on top and the  maximum
+on the left, while an inverted vertical slider will have the minimum value on top and the maximum
 value on bottom.
 
 ```html
@@ -38,13 +38,20 @@ value on bottom.
 By default, the exact selected value of a slider is not visible to the user. However, this value can
 be added to the thumb by adding the `thumbLabel` attribute.
 
-The [Material Design spec](https://material.google.com/components/sliders.html) recommends using the
+The [Material Design spec](https://material.io/design/components/sliders.html#discrete-slider) recommends using the
 `thumbLabel` attribute (along with `tickInterval="1"`) only for sliders that are used to display a
 discrete value (such as a 1-5 rating).
 
 ```html
 <mat-slider thumbLabel tickInterval="1"></mat-slider>
 ```
+
+### Formatting the thumb label
+By default, the value in the slider's thumb label will be the same as the model value, however this
+may end up being too large to fit into the label. If you want to control the value that is being
+displayed, you can do so using the `displayWith` input.
+
+<!-- example(slider-formatting) -->
 
 ### Tick marks
 By default, sliders do not show tick marks along the thumb track. This can be enabled using the
@@ -67,7 +74,7 @@ The slider will always show a tick at the beginning and end of the track. If the
 doesn't add up perfectly the last interval will be shortened or lengthened so that the tick can be
 shown at the end of the track.
 
-The [Material Design spec](https://material.google.com/components/sliders.html) recommends using the
+The [Material Design spec](https://material.io/design/components/sliders.html#discrete-slider) recommends using the
 `tickInterval` attribute (set to `1` along with the `thumbLabel` attribute) only for sliders that
 are used to display a discrete value (such as a 1-5 rating).
 

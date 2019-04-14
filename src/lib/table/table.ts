@@ -6,15 +6,15 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {ChangeDetectionStrategy, Component, ViewEncapsulation} from '@angular/core';
 import {CDK_TABLE_TEMPLATE, CdkTable} from '@angular/cdk/table';
+import {ChangeDetectionStrategy, Component, ViewEncapsulation} from '@angular/core';
 
 /**
  * Wrapper for the CdkTable with Material design styles.
  */
 @Component({
   moduleId: module.id,
-  selector: 'mat-table',
+  selector: 'mat-table, table[mat-table]',
   exportAs: 'matTable',
   template: CDK_TABLE_TEMPLATE,
   styleUrls: ['table.css'],
@@ -22,7 +22,11 @@ import {CDK_TABLE_TEMPLATE, CdkTable} from '@angular/cdk/table';
     'class': 'mat-table',
   },
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  // See note on CdkTable for explanation on why this uses the default change detection strategy.
+  // tslint:disable-next-line:validate-decorators
+  changeDetection: ChangeDetectionStrategy.Default,
 })
-export class MatTable<T> extends CdkTable<T> { }
+export class MatTable<T> extends CdkTable<T> {
+  /** Overrides the sticky CSS class set by the `CdkTable`. */
+  protected stickyCssClass = 'mat-table-sticky';
+}

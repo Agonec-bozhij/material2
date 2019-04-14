@@ -22,11 +22,24 @@
   },
   "homepage": "https://github.com/angular/material2#readme",
   "peerDependencies": {
+    "@angular/animations": "0.0.0-NG",
     "@angular/cdk": "0.0.0-PLACEHOLDER",
     "@angular/core": "0.0.0-NG",
-    "@angular/common": "0.0.0-NG"
+    "@angular/common": "0.0.0-NG",
+    "@angular/forms": "0.0.0-NG"
   },
   "dependencies": {
     "tslib": "^1.7.1"
-  }
+  },
+  "schematics": "./schematics/collection.json",
+  "ng-update": {
+    "migrations": "./schematics/migration.json",
+    "packageGroup": [
+      "@angular/material",
+      "@angular/cdk",
+      "@angular/material-moment-adapter"
+    ]
+  },
+  "sideEffects": false
 }
+

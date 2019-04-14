@@ -1,3 +1,5 @@
+@import '../../cdk/a11y/a11y';
+
 $mat-sort-header-arrow-margin: 6px;
 $mat-sort-header-arrow-container-size: 12px;
 $mat-sort-header-arrow-stem-size: 10px;
@@ -8,6 +10,7 @@ $mat-sort-header-arrow-hint-opacity: 0.38;
 .mat-sort-header-container {
   display: flex;
   cursor: pointer;
+  align-items: center;
 
   .mat-sort-header-disabled & {
     cursor: default;
@@ -28,17 +31,33 @@ $mat-sort-header-arrow-hint-opacity: 0.38;
   outline: 0;
   font: inherit;
   color: currentColor;
+
+  // The `outline: 0` from above works on all browsers, however Firefox also
+  // adds a special `focus-inner` which we have to disable explicitly. See:
+  // https://developer.mozilla.org/en-US/docs/Web/HTML/Element/button#Firefox
+  &::-moz-focus-inner {
+    border: 0;
+  }
 }
 
 .mat-sort-header-arrow {
   height: $mat-sort-header-arrow-container-size;
   width: $mat-sort-header-arrow-container-size;
   min-width: $mat-sort-header-arrow-container-size;
-  margin: 0 0 0 $mat-sort-header-arrow-margin;
   position: relative;
   display: flex;
 
-  .mat-sort-header-position-before & {
+  // Start off at 0 since the arrow may become visible while parent are animating.
+  // This will be overwritten when the arrow animations kick in. See #11819.
+  opacity: 0;
+
+  &,
+  [dir='rtl'] .mat-sort-header-position-before & {
+    margin: 0 0 0 $mat-sort-header-arrow-margin;
+  }
+
+  .mat-sort-header-position-before &,
+  [dir='rtl'] & {
     margin: 0 $mat-sort-header-arrow-margin 0 0;
   }
 }
@@ -50,6 +69,11 @@ $mat-sort-header-arrow-hint-opacity: 0.38;
   margin: auto;
   display: flex;
   align-items: center;
+
+  @include cdk-high-contrast {
+    width: 0;
+    border-left: solid $mat-sort-header-arrow-thickness;
+  }
 }
 
 .mat-sort-header-indicator {
@@ -68,6 +92,13 @@ $mat-sort-header-arrow-hint-opacity: 0.38;
   width: $mat-sort-header-arrow-thickness;
   background: currentColor;
   transform: rotate(45deg);
+
+  @include cdk-high-contrast {
+    width: 0;
+    height: 0;
+    border-top: solid $mat-sort-header-arrow-thickness;
+    border-left: solid $mat-sort-header-arrow-thickness;
+  }
 }
 
 .mat-sort-header-pointer-left,
@@ -77,6 +108,13 @@ $mat-sort-header-arrow-hint-opacity: 0.38;
   height: $mat-sort-header-arrow-thickness;
   position: absolute;
   top: 0;
+
+  @include cdk-high-contrast {
+    width: 0;
+    height: 0;
+    border-left: solid $mat-sort-header-arrow-pointer-length;
+    border-top: solid $mat-sort-header-arrow-thickness;
+  }
 }
 
 .mat-sort-header-pointer-left {

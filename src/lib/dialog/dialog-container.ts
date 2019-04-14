@@ -52,36 +52,33 @@ export function throwMatDialogContentAlreadyAttachedError() {
   templateUrl: 'dialog-container.html',
   styleUrls: ['dialog.css'],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   // Using OnPush for dialogs caused some G3 sync issues. Disabled until we can track them down.
   // tslint:disable-next-line:validate-decorators
   changeDetection: ChangeDetectionStrategy.Default,
-  animations: [matDialogAnimations.slideDialog],
+  animations: [matDialogAnimations.dialogContainer],
   host: {
     'class': 'mat-dialog-container',
     'tabindex': '-1',
+    'aria-modal': 'true',
     '[attr.id]': '_id',
-    '[attr.role]': '_config?.role',
-    '[attr.aria-labelledby]': '_config?.ariaLabel ? null : _ariaLabelledBy',
-    '[attr.aria-label]': '_config?.ariaLabel',
-    '[attr.aria-describedby]': '_config?.ariaDescribedBy || null',
-    '[@slideDialog]': '_state',
-    '(@slideDialog.start)': '_onAnimationStart($event)',
-    '(@slideDialog.done)': '_onAnimationDone($event)',
+    '[attr.role]': '_config.role',
+    '[attr.aria-labelledby]': '_config.ariaLabel ? null : _ariaLabelledBy',
+    '[attr.aria-label]': '_config.ariaLabel',
+    '[attr.aria-describedby]': '_config.ariaDescribedBy || null',
+    '[@dialogContainer]': '_state',
+    '(@dialogContainer.start)': '_onAnimationStart($event)',
+    '(@dialogContainer.done)': '_onAnimationDone($event)',
   },
 })
 export class MatDialogContainer extends BasePortalOutlet {
   /** The portal outlet inside of this container into which the dialog content will be loaded. */
-  @ViewChild(CdkPortalOutlet) _portalOutlet: CdkPortalOutlet;
+  @ViewChild(CdkPortalOutlet, {static: true}) _portalOutlet: CdkPortalOutlet;
 
   /** The class that traps and manages focus within the dialog. */
   private _focusTrap: FocusTrap;
 
   /** Element that was focused before the dialog was opened. Save this to restore upon close. */
   private _elementFocusedBeforeDialogWasOpened: HTMLElement | null = null;
-
-  /** The dialog configuration. */
-  _config: MatDialogConfig;
 
   /** State of the dialog animation. */
   _state: 'void' | 'enter' | 'exit' = 'enter';
@@ -90,7 +87,7 @@ export class MatDialogContainer extends BasePortalOutlet {
   _animationStateChanged = new EventEmitter<AnimationEvent>();
 
   /** ID of the element that should be considered as the dialog's label. */
-  _ariaLabelledBy: string | null = null;
+  _ariaLabelledBy: string | null;
 
   /** ID for the container DOM element. */
   _id: string;
@@ -99,9 +96,12 @@ export class MatDialogContainer extends BasePortalOutlet {
     private _elementRef: ElementRef,
     private _focusTrapFactory: FocusTrapFactory,
     private _changeDetectorRef: ChangeDetectorRef,
-    @Optional() @Inject(DOCUMENT) private _document: any) {
+    @Optional() @Inject(DOCUMENT) private _document: any,
+    /** The dialog configuration. */
+    public _config: MatDialogConfig) {
 
     super();
+    this._ariaLabelledBy = _config.ariaLabelledBy || null;
   }
 
   /**
@@ -149,7 +149,7 @@ export class MatDialogContainer extends BasePortalOutlet {
     const toFocus = this._elementFocusedBeforeDialogWasOpened;
 
     // We need the extra check, because IE can set the `activeElement` to null in some cases.
-    if (toFocus && typeof toFocus.focus === 'function') {
+    if (this._config.restoreFocus && toFocus && typeof toFocus.focus === 'function') {
       toFocus.focus();
     }
 

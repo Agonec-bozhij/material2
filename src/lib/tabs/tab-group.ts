@@ -6,6 +6,7 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
+import {coerceBooleanProperty, coerceNumberProperty} from '@angular/cdk/coercion';
 import {
   AfterContentChecked,
   AfterContentInit,
@@ -21,19 +22,22 @@ import {
   QueryList,
   ViewChild,
   ViewEncapsulation,
+  InjectionToken,
+  Inject,
+  Optional,
 } from '@angular/core';
-import {coerceBooleanProperty, coerceNumberProperty} from '@angular/cdk/coercion';
-import {Subscription} from 'rxjs/Subscription';
-import {MatTab} from './tab';
-import {MatTabHeader} from './tab-header';
-import {merge} from 'rxjs/observable/merge';
 import {
   CanColor,
+  CanColorCtor,
   CanDisableRipple,
+  CanDisableRippleCtor,
   mixinColor,
   mixinDisableRipple,
-  ThemePalette
+  ThemePalette,
 } from '@angular/material/core';
+import {merge, Subscription} from 'rxjs';
+import {MatTab} from './tab';
+import {MatTabHeader} from './tab-header';
 
 
 /** Used to generate unique ID's for each tab component */
@@ -50,17 +54,27 @@ export class MatTabChangeEvent {
 /** Possible positions for the tab header. */
 export type MatTabHeaderPosition = 'above' | 'below';
 
+/** Object that can be used to configure the default options for the tabs module. */
+export interface MatTabsConfig {
+  /** Duration for the tab animation. Must be a valid CSS value (e.g. 600ms). */
+  animationDuration?: string;
+}
+
+/** Injection token that can be used to provide the default options the tabs module. */
+export const MAT_TABS_CONFIG = new InjectionToken('MAT_TABS_CONFIG');
+
 // Boilerplate for applying mixins to MatTabGroup.
 /** @docs-private */
 export class MatTabGroupBase {
   constructor(public _elementRef: ElementRef) {}
 }
-export const _MatTabGroupMixinBase = mixinColor(mixinDisableRipple(MatTabGroupBase), 'primary');
+export const _MatTabGroupMixinBase: CanColorCtor & CanDisableRippleCtor & typeof MatTabGroupBase =
+    mixinColor(mixinDisableRipple(MatTabGroupBase), 'primary');
 
 /**
  * Material design tab-group component.  Supports basic tab pairs (label + content) and includes
  * animated ink-bar, keyboard navigation, and screen reader.
- * See: https://www.google.com/design/spec/components/tabs.html
+ * See: https://material.io/design/components/tabs.html
  */
 @Component({
   moduleId: module.id,
@@ -69,7 +83,6 @@ export const _MatTabGroupMixinBase = mixinColor(mixinDisableRipple(MatTabGroupBa
   templateUrl: 'tab-group.html',
   styleUrls: ['tab-group.css'],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
   inputs: ['color', 'disableRipple'],
   host: {
@@ -83,7 +96,9 @@ export class MatTabGroup extends _MatTabGroupMixinBase implements AfterContentIn
 
   @ContentChildren(MatTab) _tabs: QueryList<MatTab>;
 
-  @ViewChild('tabBodyWrapper') _tabBodyWrapper: ElementRef;
+  @ViewChild('tabBodyWrapper', {static: false}) _tabBodyWrapper: ElementRef;
+
+  @ViewChild('tabHeader', {static: false}) _tabHeader: MatTabHeader;
 
   /** The tab index that should be selected after the content has been checked. */
   private _indexToSelect: number | null = 0;
@@ -103,14 +118,6 @@ export class MatTabGroup extends _MatTabGroupMixinBase implements AfterContentIn
   set dynamicHeight(value: boolean) { this._dynamicHeight = coerceBooleanProperty(value); }
   private _dynamicHeight: boolean = false;
 
-  /**
-   * @deprecated
-   * @deletion-target 6.0.0
-   */
-  @Input('mat-dynamic-height')
-  get _dynamicHeightDeprecated(): boolean { return this._dynamicHeight; }
-  set _dynamicHeightDeprecated(value: boolean) { this._dynamicHeight = value; }
-
   /** The index of the active tab. */
   @Input()
   get selectedIndex(): number | null { return this._selectedIndex; }
@@ -121,6 +128,14 @@ export class MatTabGroup extends _MatTabGroupMixinBase implements AfterContentIn
 
   /** Position of the tab header. */
   @Input() headerPosition: MatTabHeaderPosition = 'above';
+
+  /** Duration for the tab animation. Will be normalized to milliseconds if no units are set. */
+  @Input()
+  get animationDuration(): string { return this._animationDuration; }
+  set animationDuration(value: string) {
+    this._animationDuration = /^\d+$/.test(value) ? value + 'ms' : value;
+  }
+  private _animationDuration: string;
 
   /** Background color of the tab group. */
   @Input()
@@ -152,19 +167,15 @@ export class MatTabGroup extends _MatTabGroupMixinBase implements AfterContentIn
   @Output() readonly selectedTabChange: EventEmitter<MatTabChangeEvent> =
       new EventEmitter<MatTabChangeEvent>(true);
 
-  /**
-   * Event emitted when the tab selection has changed.
-   * @deprecated Use `selectedTabChange` instead.
-   * @deletion-target 6.0.0
-   */
-  @Output() readonly selectChange: EventEmitter<MatTabChangeEvent> = this.selectedTabChange;
-
   private _groupId: number;
 
   constructor(elementRef: ElementRef,
-              private _changeDetectorRef: ChangeDetectorRef) {
+              private _changeDetectorRef: ChangeDetectorRef,
+              @Inject(MAT_TABS_CONFIG) @Optional() defaultConfig?: MatTabsConfig) {
     super(elementRef);
     this._groupId = nextId++;
+    this.animationDuration = defaultConfig && defaultConfig.animationDuration ?
+        defaultConfig.animationDuration : '500ms';
   }
 
   /**
@@ -174,27 +185,33 @@ export class MatTabGroup extends _MatTabGroupMixinBase implements AfterContentIn
    * a new selected tab should transition in (from the left or right).
    */
   ngAfterContentChecked() {
-    // Clamp the next selected index to the boundsof 0 and the tabs length.
-    // Note the `|| 0`, which ensures that values like NaN can't get through
-    // and which would otherwise throw the component into an infinite loop
-    // (since Math.max(NaN, 0) === NaN).
-    let indexToSelect = this._indexToSelect =
-        Math.min(this._tabs.length - 1, Math.max(this._indexToSelect || 0, 0));
+    // Don't clamp the `indexToSelect` immediately in the setter because it can happen that
+    // the amount of tabs changes before the actual change detection runs.
+    const indexToSelect = this._indexToSelect = this._clampTabIndex(this._indexToSelect);
 
     // If there is a change in selected index, emit a change event. Should not trigger if
     // the selected index has not yet been initialized.
-    if (this._selectedIndex != indexToSelect && this._selectedIndex != null) {
-      const tabChangeEvent = this._createChangeEvent(indexToSelect);
-      this.selectedTabChange.emit(tabChangeEvent);
-      // Emitting this value after change detection has run
-      // since the checked content may contain this variable'
-      Promise.resolve().then(() => this.selectedIndexChange.emit(indexToSelect));
+    if (this._selectedIndex != indexToSelect) {
+      const isFirstRun = this._selectedIndex == null;
+
+      if (!isFirstRun) {
+        this.selectedTabChange.emit(this._createChangeEvent(indexToSelect));
+      }
+
+      // Changing these values after change detection has run
+      // since the checked content may contain references to them.
+      Promise.resolve().then(() => {
+        this._tabs.forEach((tab, index) => tab.isActive = index === indexToSelect);
+
+        if (!isFirstRun) {
+          this.selectedIndexChange.emit(indexToSelect);
+        }
+      });
     }
 
     // Setup the position for each tab and optionally setup an origin on the next selected tab.
     this._tabs.forEach((tab: MatTab, index: number) => {
       tab.position = index - indexToSelect;
-      tab.isActive = index === indexToSelect;
 
       // If there is already a selected tab, then set up an origin for the next selected tab
       // if it doesn't have one already.
@@ -215,6 +232,24 @@ export class MatTabGroup extends _MatTabGroupMixinBase implements AfterContentIn
     // Subscribe to changes in the amount of tabs, in order to be
     // able to re-render the content as new tabs are added or removed.
     this._tabsSubscription = this._tabs.changes.subscribe(() => {
+      const indexToSelect = this._clampTabIndex(this._indexToSelect);
+
+      // Maintain the previously-selected tab if a new tab is added or removed and there is no
+      // explicit change that selects a different tab.
+      if (indexToSelect === this._selectedIndex) {
+        const tabs = this._tabs.toArray();
+
+        for (let i = 0; i < tabs.length; i++) {
+          if (tabs[i].isActive) {
+            // Assign both to the `_indexToSelect` and `_selectedIndex` so we don't fire a changed
+            // event, otherwise the consumer may end up in an infinite loop in some edge cases like
+            // adding a tab within the `selectedIndexChange` event.
+            this._indexToSelect = this._selectedIndex = i;
+            break;
+          }
+        }
+      }
+
       this._subscribeToTabLabels();
       this._changeDetectorRef.markForCheck();
     });
@@ -223,6 +258,13 @@ export class MatTabGroup extends _MatTabGroupMixinBase implements AfterContentIn
   ngOnDestroy() {
     this._tabsSubscription.unsubscribe();
     this._tabLabelSubscription.unsubscribe();
+  }
+
+  /** Re-aligns the ink bar to the selected tab element. */
+  realignInkBar() {
+    if (this._tabHeader) {
+      this._tabHeader._alignInkBarToSelectedTab();
+    }
   }
 
   _focusChanged(index: number) {
@@ -249,11 +291,16 @@ export class MatTabGroup extends _MatTabGroupMixinBase implements AfterContentIn
       this._tabLabelSubscription.unsubscribe();
     }
 
-    this._tabLabelSubscription = merge(
-        ...this._tabs.map(tab => tab._disableChange),
-        ...this._tabs.map(tab => tab._labelChange)).subscribe(() => {
-      this._changeDetectorRef.markForCheck();
-    });
+    this._tabLabelSubscription = merge(...this._tabs.map(tab => tab._stateChanges))
+      .subscribe(() => this._changeDetectorRef.markForCheck());
+  }
+
+  /** Clamps the given index to the bounds of 0 and the tabs length. */
+  private _clampTabIndex(index: number | null): number {
+    // Note the `|| 0`, which ensures that values like NaN can't get through
+    // and which would otherwise throw the component into an infinite loop
+    // (since Math.max(NaN, 0) === NaN).
+    return Math.min(this._tabs.length - 1, Math.max(index || 0, 0));
   }
 
   /** Returns a unique id for each tab label element */
@@ -286,15 +333,16 @@ export class MatTabGroup extends _MatTabGroupMixinBase implements AfterContentIn
 
   /** Removes the height of the tab body wrapper. */
   _removeTabBodyWrapperHeight(): void {
-    this._tabBodyWrapperHeight = this._tabBodyWrapper.nativeElement.clientHeight;
-    this._tabBodyWrapper.nativeElement.style.height = '';
+    const wrapper = this._tabBodyWrapper.nativeElement;
+    this._tabBodyWrapperHeight = wrapper.clientHeight;
+    wrapper.style.height = '';
     this.animationDone.emit();
   }
 
   /** Handle click events, setting new selected index if appropriate. */
-  _handleClick(tab: MatTab, tabHeader: MatTabHeader, idx: number) {
+  _handleClick(tab: MatTab, tabHeader: MatTabHeader, index: number) {
     if (!tab.disabled) {
-      this.selectedIndex = tabHeader.focusIndex = idx;
+      this.selectedIndex = tabHeader.focusIndex = index;
     }
   }
 

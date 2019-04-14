@@ -28,7 +28,7 @@ describe('CdkAccordionItem', () => {
       fixture = TestBed.createComponent(SingleItem);
       item = fixture.debugElement
         .query(By.directive(CdkAccordionItem))
-        .injector.get(CdkAccordionItem);
+        .injector.get<CdkAccordionItem>(CdkAccordionItem);
     });
 
     describe('that is not disabled', () => {
@@ -132,6 +132,45 @@ describe('CdkAccordionItem', () => {
         expect(item.destroyed.emit).toHaveBeenCalled();
       });
     });
+
+    it('should emit to and complete the `destroyed` stream on destroy', () => {
+      const emitSpy = jasmine.createSpy('emit spy');
+      const completeSpy = jasmine.createSpy('complete spy');
+      const subscription = item.destroyed.subscribe(emitSpy, undefined, completeSpy);
+
+      fixture.detectChanges();
+      fixture.destroy();
+
+      expect(emitSpy).toHaveBeenCalled();
+      expect(completeSpy).toHaveBeenCalled();
+
+      subscription.unsubscribe();
+    });
+
+    it('should complete the `opened` stream on destroy', () => {
+      const completeSpy = jasmine.createSpy('complete spy');
+      const subscription = item.opened.subscribe(() => {}, undefined, completeSpy);
+
+      fixture.detectChanges();
+      fixture.destroy();
+
+      expect(completeSpy).toHaveBeenCalled();
+
+      subscription.unsubscribe();
+    });
+
+    it('should complete the `closed` stream on destroy', () => {
+      const completeSpy = jasmine.createSpy('complete spy');
+      const subscription = item.closed.subscribe(() => {}, undefined, completeSpy);
+
+      fixture.detectChanges();
+      fixture.destroy();
+
+      expect(completeSpy).toHaveBeenCalled();
+
+      subscription.unsubscribe();
+    });
+
   });
 
   describe('items without accordion', () => {
@@ -143,9 +182,7 @@ describe('CdkAccordionItem', () => {
       fixture = TestBed.createComponent(ItemGroupWithoutAccordion);
       [firstItem, secondItem] = fixture.debugElement
         .queryAll(By.directive(CdkAccordionItem))
-        .map(el => {
-          return el.injector.get(CdkAccordionItem) as CdkAccordionItem;
-        });
+        .map(el => el.injector.get<CdkAccordionItem>(CdkAccordionItem));
     });
 
     it('should not change expanded state based on unrelated items', () => {
@@ -186,9 +223,7 @@ describe('CdkAccordionItem', () => {
       fixture = TestBed.createComponent(ItemGroupWithAccordion);
       [firstItem, secondItem] = fixture.debugElement
         .queryAll(By.directive(CdkAccordionItem))
-        .map(el => {
-          return el.injector.get(CdkAccordionItem) as CdkAccordionItem;
-        });
+        .map(el => el.injector.get<CdkAccordionItem>(CdkAccordionItem));
     });
 
     it('should change expanded state based on related items', () => {

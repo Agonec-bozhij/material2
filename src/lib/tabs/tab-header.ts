@@ -7,7 +7,9 @@
  */
 
 import {Direction, Directionality} from '@angular/cdk/bidi';
-import {ENTER, LEFT_ARROW, RIGHT_ARROW, SPACE, HOME, END} from '@angular/cdk/keycodes';
+import {coerceNumberProperty} from '@angular/cdk/coercion';
+import {END, ENTER, HOME, SPACE, hasModifierKey} from '@angular/cdk/keycodes';
+import {ViewportRuler} from '@angular/cdk/scrolling';
 import {
   AfterContentChecked,
   AfterContentInit,
@@ -18,22 +20,27 @@ import {
   ElementRef,
   EventEmitter,
   Input,
+  NgZone,
   OnDestroy,
   Optional,
   Output,
   QueryList,
   ViewChild,
   ViewEncapsulation,
+  AfterViewInit,
 } from '@angular/core';
-import {CanDisableRipple, mixinDisableRipple} from '@angular/material/core';
-import {merge} from 'rxjs/observable/merge';
-import {of as observableOf} from 'rxjs/observable/of';
-import {Subscription} from 'rxjs/Subscription';
-import {coerceNumberProperty} from '@angular/cdk/coercion';
+import {CanDisableRipple, CanDisableRippleCtor, mixinDisableRipple} from '@angular/material/core';
+import {merge, of as observableOf, Subject, timer, fromEvent} from 'rxjs';
+import {takeUntil} from 'rxjs/operators';
 import {MatInkBar} from './ink-bar';
 import {MatTabLabelWrapper} from './tab-label-wrapper';
-import {ViewportRuler} from '@angular/cdk/scrolling';
+import {FocusKeyManager} from '@angular/cdk/a11y';
+import {Platform, normalizePassiveListenerOptions} from '@angular/cdk/platform';
 
+
+/** Config used to bind passive event listeners */
+const passiveEventListenerOptions =
+    normalizePassiveListenerOptions({passive: true}) as EventListenerOptions;
 
 /**
  * The directions that scrolling can go in when the header's tabs exceed the header width. 'After'
@@ -48,10 +55,23 @@ export type ScrollDirection = 'after' | 'before';
  */
 const EXAGGERATED_OVERSCROLL = 60;
 
+/**
+ * Amount of milliseconds to wait before starting to scroll the header automatically.
+ * Set a little conservatively in order to handle fake events dispatched on touch devices.
+ */
+const HEADER_SCROLL_DELAY = 650;
+
+/**
+ * Interval in milliseconds at which to scroll the header
+ * while the user is holding their pointer.
+ */
+const HEADER_SCROLL_INTERVAL = 100;
+
 // Boilerplate for applying mixins to MatTabHeader.
 /** @docs-private */
 export class MatTabHeaderBase {}
-export const _MatTabHeaderMixinBase = mixinDisableRipple(MatTabHeaderBase);
+export const _MatTabHeaderMixinBase: CanDisableRippleCtor & typeof MatTabHeaderBase =
+    mixinDisableRipple(MatTabHeaderBase);
 
 /**
  * The header of the tab group which displays a list of all the tabs in the tab group. Includes
@@ -67,7 +87,6 @@ export const _MatTabHeaderMixinBase = mixinDisableRipple(MatTabHeaderBase);
   styleUrls: ['tab-header.css'],
   inputs: ['disableRipple'],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     'class': 'mat-tab-header',
@@ -76,15 +95,14 @@ export const _MatTabHeaderMixinBase = mixinDisableRipple(MatTabHeaderBase);
   },
 })
 export class MatTabHeader extends _MatTabHeaderMixinBase
-    implements AfterContentChecked, AfterContentInit, OnDestroy, CanDisableRipple {
+    implements AfterContentChecked, AfterContentInit, AfterViewInit, OnDestroy, CanDisableRipple {
 
   @ContentChildren(MatTabLabelWrapper) _labelWrappers: QueryList<MatTabLabelWrapper>;
-  @ViewChild(MatInkBar) _inkBar: MatInkBar;
-  @ViewChild('tabListContainer') _tabListContainer: ElementRef;
-  @ViewChild('tabList') _tabList: ElementRef;
-
-  /** The tab index that is focused. */
-  private _focusIndex: number = 0;
+  @ViewChild(MatInkBar, {static: true}) _inkBar: MatInkBar;
+  @ViewChild('tabListContainer', {static: true}) _tabListContainer: ElementRef;
+  @ViewChild('tabList', {static: true}) _tabList: ElementRef;
+  @ViewChild('nextPaginator', {static: false}) _nextPaginator: ElementRef<HTMLElement>;
+  @ViewChild('previousPaginator', {static: false}) _previousPaginator: ElementRef<HTMLElement>;
 
   /** The distance in pixels that the tab labels should be translated to the left. */
   private _scrollDistance = 0;
@@ -92,8 +110,8 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
   /** Whether the header should scroll to the selected index after the view has been checked. */
   private _selectedIndexChanged = false;
 
-  /** Combines listeners that will re-align the ink bar whenever they're invoked. */
-  private _realignInkBar = Subscription.EMPTY;
+  /** Emits when the component is destroyed. */
+  private readonly _destroyed = new Subject<void>();
 
   /** Whether the controls for pagination should be displayed */
   _showPaginationControls = false;
@@ -113,7 +131,14 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
   /** Whether the scroll distance has changed and should be applied after the view is checked. */
   private _scrollDistanceChanged: boolean;
 
-  private _selectedIndex: number = 0;
+  /** Used to manage focus between the tabs. */
+  private _keyManager: FocusKeyManager<MatTabLabelWrapper>;
+
+  /** Cached text content of the header. */
+  private _currentTextContent: string;
+
+  /** Stream that will stop the automated scrolling. */
+  private _stopScrolling = new Subject<void>();
 
   /** The index of the active tab. */
   @Input()
@@ -122,26 +147,41 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
     value = coerceNumberProperty(value);
     this._selectedIndexChanged = this._selectedIndex != value;
     this._selectedIndex = value;
-    this._focusIndex = value;
+
+    if (this._keyManager) {
+      this._keyManager.updateActiveItemIndex(value);
+    }
   }
+  private _selectedIndex: number = 0;
 
   /** Event emitted when the option is selected. */
-  @Output() readonly selectFocusedIndex = new EventEmitter();
+  @Output() readonly selectFocusedIndex: EventEmitter<number> = new EventEmitter<number>();
 
   /** Event emitted when a label is focused. */
-  @Output() readonly indexFocused = new EventEmitter();
+  @Output() readonly indexFocused: EventEmitter<number> = new EventEmitter<number>();
 
   constructor(private _elementRef: ElementRef,
               private _changeDetectorRef: ChangeDetectorRef,
               private _viewportRuler: ViewportRuler,
-              @Optional() private _dir: Directionality) {
+              @Optional() private _dir: Directionality,
+              private _ngZone: NgZone,
+              private _platform: Platform) {
     super();
+
+    // Bind the `mouseleave` event on the outside since it doesn't change anything in the view.
+    _ngZone.runOutsideAngular(() => {
+      fromEvent(_elementRef.nativeElement, 'mouseleave')
+        .pipe(takeUntil(this._destroyed))
+        .subscribe(() => {
+          this._stopInterval();
+        });
+    });
   }
 
   ngAfterContentChecked(): void {
     // If the number of tab labels have changed, check if scrolling should be enabled
     if (this._tabLabelCount != this._labelWrappers.length) {
-      this._updatePagination();
+      this.updatePagination();
       this._tabLabelCount = this._labelWrappers.length;
       this._changeDetectorRef.markForCheck();
     }
@@ -165,20 +205,20 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
     }
   }
 
+  /** Handles keyboard events on the header. */
   _handleKeydown(event: KeyboardEvent) {
+    // We don't handle any key bindings with a modifier key.
+    if (hasModifierKey(event)) {
+      return;
+    }
+
     switch (event.keyCode) {
-      case RIGHT_ARROW:
-        this._focusNextTab();
-        break;
-      case LEFT_ARROW:
-        this._focusPreviousTab();
-        break;
       case HOME:
-        this._focusFirstTab();
+        this._keyManager.setFirstItemActive();
         event.preventDefault();
         break;
       case END:
-        this._focusLastTab();
+        this._keyManager.setLastItemActive();
         event.preventDefault();
         break;
       case ENTER:
@@ -186,6 +226,8 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
         this.selectFocusedIndex.emit(this.focusIndex);
         event.preventDefault();
         break;
+      default:
+        this._keyManager.onKeydown(event);
     }
   }
 
@@ -196,49 +238,105 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
     const dirChange = this._dir ? this._dir.change : observableOf(null);
     const resize = this._viewportRuler.change(150);
     const realign = () => {
-      this._updatePagination();
+      this.updatePagination();
       this._alignInkBarToSelectedTab();
     };
+
+    this._keyManager = new FocusKeyManager(this._labelWrappers)
+      .withHorizontalOrientation(this._getLayoutDirection())
+      .withWrap();
+
+    this._keyManager.updateActiveItem(0);
 
     // Defer the first call in order to allow for slower browsers to lay out the elements.
     // This helps in cases where the user lands directly on a page with paginated tabs.
     typeof requestAnimationFrame !== 'undefined' ? requestAnimationFrame(realign) : realign();
-    this._realignInkBar = merge(dirChange, resize).subscribe(realign);
+
+    // On dir change or window resize, realign the ink bar and update the orientation of
+    // the key manager if the direction has changed.
+    merge(dirChange, resize).pipe(takeUntil(this._destroyed)).subscribe(() => {
+      realign();
+      this._keyManager.withHorizontalOrientation(this._getLayoutDirection());
+    });
+
+    // If there is a change in the focus key manager we need to emit the `indexFocused`
+    // event in order to provide a public event that notifies about focus changes. Also we realign
+    // the tabs container by scrolling the new focused tab into the visible section.
+    this._keyManager.change.pipe(takeUntil(this._destroyed)).subscribe(newFocusIndex => {
+      this.indexFocused.emit(newFocusIndex);
+      this._setTabFocus(newFocusIndex);
+    });
+  }
+
+  ngAfterViewInit() {
+    // We need to handle these events manually, because we want to bind passive event listeners.
+    fromEvent(this._previousPaginator.nativeElement, 'touchstart', passiveEventListenerOptions)
+      .pipe(takeUntil(this._destroyed))
+      .subscribe(() => {
+        this._handlePaginatorPress('before');
+      });
+
+    fromEvent(this._nextPaginator.nativeElement, 'touchstart', passiveEventListenerOptions)
+      .pipe(takeUntil(this._destroyed))
+      .subscribe(() => {
+        this._handlePaginatorPress('after');
+      });
   }
 
   ngOnDestroy() {
-    this._realignInkBar.unsubscribe();
+    this._destroyed.next();
+    this._destroyed.complete();
+    this._stopScrolling.complete();
   }
 
   /**
    * Callback for when the MutationObserver detects that the content has changed.
    */
   _onContentChanges() {
-    this._updatePagination();
-    this._alignInkBarToSelectedTab();
-    this._changeDetectorRef.markForCheck();
+    const textContent = this._elementRef.nativeElement.textContent;
+
+    // We need to diff the text content of the header, because the MutationObserver callback
+    // will fire even if the text content didn't change which is inefficient and is prone
+    // to infinite loops if a poorly constructed expression is passed in (see #14249).
+    if (textContent !== this._currentTextContent) {
+      this._currentTextContent = textContent;
+
+      // The content observer runs outside the `NgZone` by default, which
+      // means that we need to bring the callback back in ourselves.
+      this._ngZone.run(() => {
+        this.updatePagination();
+        this._alignInkBarToSelectedTab();
+        this._changeDetectorRef.markForCheck();
+      });
+    }
   }
 
   /**
-   * Updating the view whether pagination should be enabled or not
+   * Updates the view whether pagination should be enabled or not.
+   *
+   * WARNING: Calling this method can be very costly in terms of performance.  It should be called
+   * as infrequently as possible from outside of the Tabs component as it causes a reflow of the
+   * page.
    */
-  _updatePagination() {
+  updatePagination() {
     this._checkPaginationEnabled();
     this._checkScrollingControls();
     this._updateTabScrollPosition();
   }
 
-  /** When the focus index is set, we must manually send focus to the correct label */
-  set focusIndex(value: number) {
-    if (!this._isValidIndex(value) || this._focusIndex == value) { return; }
-
-    this._focusIndex = value;
-    this.indexFocused.emit(value);
-    this._setTabFocus(value);
+  /** Tracks which element has focus; used for keyboard navigation */
+  get focusIndex(): number {
+    return this._keyManager ? this._keyManager.activeItemIndex! : 0;
   }
 
-  /** Tracks which element has focus; used for keyboard navigation */
-  get focusIndex(): number { return this._focusIndex; }
+  /** When the focus index is set, we must manually send focus to the correct label */
+  set focusIndex(value: number) {
+    if (!this._isValidIndex(value) || this.focusIndex === value || !this._keyManager) {
+      return;
+    }
+
+    this._keyManager.setActiveItem(value);
+  }
 
   /**
    * Determines if an index is valid.  If the tabs are not ready yet, we assume that the user is
@@ -277,53 +375,6 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
     }
   }
 
-  /**
-   * Moves the focus towards the beginning or the end of the list depending on the offset provided.
-   * Valid offsets are 1 and -1.
-   */
-  _moveFocus(offset: number) {
-    if (this._labelWrappers) {
-      const tabs: MatTabLabelWrapper[] = this._labelWrappers.toArray();
-
-      for (let i = this.focusIndex + offset; i < tabs.length && i >= 0; i += offset) {
-        if (this._isValidIndex(i)) {
-          this.focusIndex = i;
-          return;
-        }
-      }
-    }
-  }
-
-  /** Increment the focus index by 1 until a valid tab is found. */
-  _focusNextTab(): void {
-    this._moveFocus(this._getLayoutDirection() == 'ltr' ? 1 : -1);
-  }
-
-  /** Decrement the focus index by 1 until a valid tab is found. */
-  _focusPreviousTab(): void {
-    this._moveFocus(this._getLayoutDirection() == 'ltr' ? -1 : 1);
-  }
-
-  /** Focuses the first tab. */
-  private _focusFirstTab(): void {
-    for (let i = 0; i < this._labelWrappers.length; i++) {
-      if (this._isValidIndex(i)) {
-        this.focusIndex = i;
-        break;
-      }
-    }
-  }
-
-  /** Focuses the last tab. */
-  private _focusLastTab(): void {
-    for (let i = this._labelWrappers.length - 1; i > -1; i--) {
-      if (this._isValidIndex(i)) {
-        this.focusIndex = i;
-        break;
-      }
-    }
-  }
-
   /** The layout direction of the containing app. */
   _getLayoutDirection(): Direction {
     return this._dir && this._dir.value === 'rtl' ? 'rtl' : 'ltr';
@@ -332,20 +383,30 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
   /** Performs the CSS transformation on the tab list that will cause the list to scroll. */
   _updateTabScrollPosition() {
     const scrollDistance = this.scrollDistance;
+    const platform = this._platform;
     const translateX = this._getLayoutDirection() === 'ltr' ? -scrollDistance : scrollDistance;
 
-    this._tabList.nativeElement.style.transform = `translate3d(${translateX}px, 0, 0)`;
+    // Don't use `translate3d` here because we don't want to create a new layer. A new layer
+    // seems to cause flickering and overflow in Internet Explorer. For example, the ink bar
+    // and ripples will exceed the boundaries of the visible tab bar.
+    // See: https://github.com/angular/material2/issues/10276
+    // We round the `transform` here, because transforms with sub-pixel precision cause some
+    // browsers to blur the content of the element.
+    this._tabList.nativeElement.style.transform = `translateX(${Math.round(translateX)}px)`;
+
+    // Setting the `transform` on IE will change the scroll offset of the parent, causing the
+    // position to be thrown off in some cases. We have to reset it ourselves to ensure that
+    // it doesn't get thrown off. Note that we scope it only to IE and Edge, because messing
+    // with the scroll position throws off Chrome 71+ in RTL mode (see #14689).
+    if (platform.TRIDENT || platform.EDGE) {
+      this._tabListContainer.nativeElement.scrollLeft = 0;
+    }
   }
 
   /** Sets the distance in pixels that the tab header should be transformed in the X-axis. */
   get scrollDistance(): number { return this._scrollDistance; }
-  set scrollDistance(v: number) {
-    this._scrollDistance = Math.max(0, Math.min(this._getMaxScrollDistance(), v));
-
-    // Mark that the scroll distance has changed so that after the view is checked, the CSS
-    // transformation can move the header.
-    this._scrollDistanceChanged = true;
-    this._checkScrollingControls();
+  set scrollDistance(value: number) {
+    this._scrollTo(value);
   }
 
   /**
@@ -356,11 +417,19 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
    * This is an expensive call that forces a layout reflow to compute box and scroll metrics and
    * should be called sparingly.
    */
-  _scrollHeader(scrollDir: ScrollDirection) {
+  _scrollHeader(direction: ScrollDirection) {
     const viewLength = this._tabListContainer.nativeElement.offsetWidth;
 
     // Move the scroll distance one-third the length of the tab list's viewport.
-    this.scrollDistance += (scrollDir == 'before' ? -1 : 1) * viewLength / 3;
+    const scrollAmount = (direction == 'before' ? -1 : 1) * viewLength / 3;
+
+    return this._scrollTo(this._scrollDistance + scrollAmount);
+  }
+
+  /** Handles click events on the pagination arrows. */
+  _handlePaginatorClick(direction: ScrollDirection) {
+    this._stopInterval();
+    this._scrollHeader(direction);
   }
 
   /**
@@ -451,11 +520,56 @@ export class MatTabHeader extends _MatTabHeaderMixinBase
   }
 
   /** Tells the ink-bar to align itself to the current label wrapper */
-  private _alignInkBarToSelectedTab(): void {
+  _alignInkBarToSelectedTab(): void {
     const selectedLabelWrapper = this._labelWrappers && this._labelWrappers.length ?
         this._labelWrappers.toArray()[this.selectedIndex].elementRef.nativeElement :
         null;
 
-    this._inkBar.alignToElement(selectedLabelWrapper);
+    this._inkBar.alignToElement(selectedLabelWrapper!);
+  }
+
+  /** Stops the currently-running paginator interval.  */
+  _stopInterval() {
+    this._stopScrolling.next();
+  }
+
+  /**
+   * Handles the user pressing down on one of the paginators.
+   * Starts scrolling the header after a certain amount of time.
+   * @param direction In which direction the paginator should be scrolled.
+   */
+  _handlePaginatorPress(direction: ScrollDirection) {
+    // Avoid overlapping timers.
+    this._stopInterval();
+
+    // Start a timer after the delay and keep firing based on the interval.
+    timer(HEADER_SCROLL_DELAY, HEADER_SCROLL_INTERVAL)
+      // Keep the timer going until something tells it to stop or the component is destroyed.
+      .pipe(takeUntil(merge(this._stopScrolling, this._destroyed)))
+      .subscribe(() => {
+        const {maxScrollDistance, distance} = this._scrollHeader(direction);
+
+        // Stop the timer if we've reached the start or the end.
+        if (distance === 0 || distance >= maxScrollDistance) {
+          this._stopInterval();
+        }
+      });
+  }
+
+  /**
+   * Scrolls the header to a given position.
+   * @param position Position to which to scroll.
+   * @returns Information on the current scroll distance and the maximum.
+   */
+  private _scrollTo(position: number) {
+    const maxScrollDistance = this._getMaxScrollDistance();
+    this._scrollDistance = Math.max(0, Math.min(maxScrollDistance, position));
+
+    // Mark that the scroll distance has changed so that after the view is checked, the CSS
+    // transformation can move the header.
+    this._scrollDistanceChanged = true;
+    this._checkScrollingControls();
+
+    return {maxScrollDistance, distance: this._scrollDistance};
   }
 }

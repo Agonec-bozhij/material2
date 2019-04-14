@@ -7,15 +7,25 @@
     "importHelpers": false,
     "module": "commonjs",
     "target": "es5",
-    "types": ["jasmine"]
+    "types": ["jasmine"],
+    "paths": {
+      "@angular/cdk/*": ["../../dist/packages/cdk/*/public-api"],
+      "@angular/cdk-experimental/*": ["./*"]
+    }
   },
   "angularCompilerOptions": {
     "strictMetadataEmit": true,
     "skipTemplateCodegen": true,
-    "emitDecoratorMetadata": true
+    "emitDecoratorMetadata": true,
+
+    // Unset options inherited from tsconfig-build
+    "annotateForClosureCompiler": false,
+    "flatModuleOutFile": null,
+    "flatModuleId": null,
   },
   "include": [
-    "**/*.spec.ts",
-    "index.ts"
+    // Include the index.ts for each secondary entry-point
+    "./*/index.ts",
+    "**/*.spec.ts"
   ]
 }

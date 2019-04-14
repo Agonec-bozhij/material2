@@ -1,22 +1,25 @@
 @import '../core/theming/theming';
+@import '../core/style/elevation';
 @import '../core/typography/typography-utils';
 
+$_mat-button-ripple-opacity: 0.1;
+
 // Applies a focus style to an mat-button element for each of the supported palettes.
-@mixin _mat-button-focus-color($theme) {
+@mixin _mat-button-focus-overlay-color($theme) {
   $primary: map-get($theme, primary);
   $accent: map-get($theme, accent);
   $warn: map-get($theme, warn);
 
   &.mat-primary .mat-button-focus-overlay {
-    background-color: mat-color($primary, 0.12);
+    background-color: mat-color($primary);
   }
 
   &.mat-accent .mat-button-focus-overlay {
-    background-color: mat-color($accent, 0.12);
+    background-color: mat-color($accent);
   }
 
   &.mat-warn .mat-button-focus-overlay {
-    background-color: mat-color($warn, 0.12);
+    background-color: mat-color($warn);
   }
 
   &[disabled] .mat-button-focus-overlay {
@@ -24,7 +27,7 @@
   }
 }
 
-@mixin _mat-button-ripple-color($theme, $hue, $opacity: 0.2) {
+@mixin _mat-button-ripple-color($theme, $hue, $opacity: $_mat-button-ripple-opacity) {
   $primary: map-get($theme, primary);
   $accent: map-get($theme, accent);
   $warn: map-get($theme, warn);
@@ -43,7 +46,7 @@
 }
 
 // Applies a property to an mat-button element for each of the supported palettes.
-@mixin _mat-button-theme-color($theme, $property, $color: 'default') {
+@mixin _mat-button-theme-property($theme, $property, $hue) {
   $primary: map-get($theme, primary);
   $accent: map-get($theme, accent);
   $warn: map-get($theme, warn);
@@ -51,13 +54,13 @@
   $foreground: map-get($theme, foreground);
 
   &.mat-primary {
-    #{$property}: mat-color($primary, $color);
+    #{$property}: mat-color($primary, $hue);
   }
   &.mat-accent {
-    #{$property}: mat-color($accent, $color);
+    #{$property}: mat-color($accent, $hue);
   }
   &.mat-warn {
-    #{$property}: mat-color($warn, $color);
+    #{$property}: mat-color($warn, $hue);
   }
 
   &.mat-primary, &.mat-accent, &.mat-warn, &[disabled] {
@@ -76,51 +79,77 @@
   $foreground: map-get($theme, foreground);
 
   .mat-button, .mat-icon-button, .mat-stroked-button {
+    // Buttons without a background color should inherit the font color. This is necessary to
+    // ensure that the button is readable on custom background colors. It's wrong to always assume
+    // that those buttons are always placed inside of containers with the default background
+    // color of the theme (e.g. themed toolbars).
+    color: inherit;
     background: transparent;
 
-    @include _mat-button-focus-color($theme);
-    @include _mat-button-theme-color($theme, 'color');
+    @include _mat-button-theme-property($theme, 'color', default);
+    @include _mat-button-focus-overlay-color($theme);
+
+    // Setup the ripple color to be based on the text color. This ensures that the ripples
+    // are matching with the current theme palette and are in contrast to the background color
+    // (e.g in themed toolbars).
+    .mat-ripple-element {
+      opacity: $_mat-button-ripple-opacity;
+      background-color: currentColor;
+    }
   }
 
-  .mat-raised-button, .mat-fab, .mat-mini-fab {
-    // Default properties when not using any [color] value.
+  .mat-button-focus-overlay {
+    background: map_get($foreground, base);
+  }
+
+  // Note: this needs a bit extra specificity, because we're not guaranteed the inclusion
+  // order of the theme styles and the button reset may end up resetting this as well.
+  .mat-stroked-button:not([disabled]) {
+    border-color: mat-color($foreground, divider);
+  }
+
+  .mat-flat-button, .mat-raised-button, .mat-fab, .mat-mini-fab {
+    // Default font and background color when not using any color palette.
     color: mat-color($foreground, text);
     background-color: mat-color($background, raised-button);
 
-    @include _mat-button-theme-color($theme, 'color', default-contrast);
-    @include _mat-button-theme-color($theme, 'background-color');
-
-    // Add ripple effect with contrast color to buttons that don't have a focus overlay.
+    @include _mat-button-theme-property($theme, 'color', default-contrast);
+    @include _mat-button-theme-property($theme, 'background-color', default);
     @include _mat-button-ripple-color($theme, default-contrast);
   }
 
-  // Add ripple effect with default color to flat buttons, which also have a focus overlay.
-  .mat-button {
-    @include _mat-button-ripple-color($theme, default, 0.1);
+  .mat-stroked-button, .mat-flat-button {
+    @include _mat-theme-overridable-elevation(0, $theme);
   }
 
-  .mat-flat-button {
-    // Default properties when not using any [color] value.
-    color: mat-color($foreground, text);
+  .mat-raised-button {
+    @include _mat-theme-overridable-elevation(2, $theme);
 
-    background-color: mat-color($background, raised-button);
-    @include _mat-button-theme-color($theme, 'color', default-contrast);
-    @include _mat-button-theme-color($theme, 'background-color');
+    &:not([disabled]):active {
+      @include _mat-theme-overridable-elevation(8, $theme);
+    }
 
-    // Add ripple effect with contrast color to buttons that don't have a focus overlay.
-    @include _mat-button-ripple-color($theme, default-contrast);
+    &[disabled] {
+      @include _mat-theme-overridable-elevation(0, $theme);
+    }
   }
 
-  // Add ripple effect with default color to the icon button. Ripple color needs to be stronger
-  // since the icon button doesn't have a focus overlay.
-  .mat-icon-button {
-    @include _mat-button-ripple-color($theme, default);
+  .mat-fab, .mat-mini-fab {
+    @include _mat-theme-overridable-elevation(6, $theme);
+
+    &:not([disabled]):active {
+      @include _mat-theme-overridable-elevation(12, $theme);
+    }
+
+    &[disabled] {
+      @include _mat-theme-overridable-elevation(0, $theme);
+    }
   }
 }
 
 @mixin mat-button-typography($config) {
-  .mat-button, .mat-raised-button, .mat-icon-button, .mat-stroked-button, .mat-flat-button,
-  .mat-fab, .mat-mini-fab {
+  .mat-button, .mat-raised-button, .mat-icon-button, .mat-stroked-button,
+  .mat-flat-button, .mat-fab, .mat-mini-fab {
     font: {
       family: mat-font-family($config, button);
       size: mat-font-size($config, button);

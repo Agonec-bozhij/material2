@@ -6,37 +6,46 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {CdkStep, CdkStepper} from '@angular/cdk/stepper';
 import {Directionality} from '@angular/cdk/bidi';
 import {
+  CdkStep,
+  CdkStepper,
+  StepContentPositionState,
+  STEPPER_GLOBAL_OPTIONS,
+  StepperOptions
+} from '@angular/cdk/stepper';
+import {AnimationEvent} from '@angular/animations';
+import {
   AfterContentInit,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
   Component,
   ContentChild,
   ContentChildren,
   Directive,
   ElementRef,
+  EventEmitter,
   forwardRef,
   Inject,
+  Input,
+  Optional,
+  Output,
   QueryList,
   SkipSelf,
+  TemplateRef,
   ViewChildren,
   ViewEncapsulation,
-  ChangeDetectorRef,
-  ChangeDetectionStrategy,
-  Optional,
-  TemplateRef,
 } from '@angular/core';
 import {FormControl, FormGroupDirective, NgForm} from '@angular/forms';
+import {DOCUMENT} from '@angular/common';
 import {ErrorStateMatcher} from '@angular/material/core';
+import {Subject} from 'rxjs';
+import {takeUntil, distinctUntilChanged} from 'rxjs/operators';
+
 import {MatStepHeader} from './step-header';
 import {MatStepLabel} from './step-label';
-import {takeUntil} from 'rxjs/operators/takeUntil';
 import {matStepperAnimations} from './stepper-animations';
-import {MatStepperIcon} from './stepper-icon';
-
-/** Workaround for https://github.com/angular/angular/issues/17849 */
-export const _MatStep = CdkStep;
-export const _MatStepper = CdkStepper;
+import {MatStepperIcon, MatStepperIconContext} from './stepper-icon';
 
 @Component({
   moduleId: module.id,
@@ -45,16 +54,17 @@ export const _MatStepper = CdkStepper;
   providers: [{provide: ErrorStateMatcher, useExisting: MatStep}],
   encapsulation: ViewEncapsulation.None,
   exportAs: 'matStep',
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MatStep extends CdkStep implements ErrorStateMatcher {
   /** Content for step label given by `<ng-template matStepLabel>`. */
-  @ContentChild(MatStepLabel) stepLabel: MatStepLabel;
+  @ContentChild(MatStepLabel, {static: false}) stepLabel: MatStepLabel;
 
+  /** @breaking-change 8.0.0 remove the `?` after `stepperOptions` */
   constructor(@Inject(forwardRef(() => MatStepper)) stepper: MatStepper,
-              @SkipSelf() private _errorStateMatcher: ErrorStateMatcher) {
-    super(stepper);
+              @SkipSelf() private _errorStateMatcher: ErrorStateMatcher,
+              @Optional() @Inject(STEPPER_GLOBAL_OPTIONS) stepperOptions?: StepperOptions) {
+    super(stepper, stepperOptions);
   }
 
   /** Custom error state matcher that additionally checks for validity of interacted form. */
@@ -71,12 +81,10 @@ export class MatStep extends CdkStep implements ErrorStateMatcher {
 }
 
 
-@Directive({
-  selector: '[matStepper]'
-})
+@Directive({selector: '[matStepper]', providers: [{provide: CdkStepper, useExisting: MatStepper}]})
 export class MatStepper extends CdkStepper implements AfterContentInit {
   /** The list of step headers of the steps in the stepper. */
-  @ViewChildren(MatStepHeader, {read: ElementRef}) _stepHeader: QueryList<ElementRef>;
+  @ViewChildren(MatStepHeader) _stepHeader: QueryList<MatStepHeader>;
 
   /** Steps that the stepper holds. */
   @ContentChildren(MatStep) _steps: QueryList<MatStep>;
@@ -84,24 +92,35 @@ export class MatStepper extends CdkStepper implements AfterContentInit {
   /** Custom icon overrides passed in by the consumer. */
   @ContentChildren(MatStepperIcon) _icons: QueryList<MatStepperIcon>;
 
+  /** Event emitted when the current step is done transitioning in. */
+  @Output() readonly animationDone: EventEmitter<void> = new EventEmitter<void>();
+
+  /** Whether ripples should be disabled for the step headers. */
+  @Input() disableRipple: boolean;
+
   /** Consumer-specified template-refs to be used to override the header icons. */
-  _iconOverrides: {[key: string]: TemplateRef<any>} = {};
+  _iconOverrides: {[key: string]: TemplateRef<MatStepperIconContext>} = {};
+
+  /** Stream of animation `done` events when the body expands/collapses. */
+  _animationDone = new Subject<AnimationEvent>();
 
   ngAfterContentInit() {
-    const icons = this._icons.toArray();
-    const editOverride = icons.find(icon => icon.name === 'edit');
-    const doneOverride = icons.find(icon => icon.name === 'done');
-
-    if (editOverride) {
-      this._iconOverrides.edit = editOverride.templateRef;
-    }
-
-    if (doneOverride) {
-      this._iconOverrides.done = doneOverride.templateRef;
-    }
+    this._icons.forEach(({name, templateRef}) => this._iconOverrides[name] = templateRef);
 
     // Mark the component for change detection whenever the content children query changes
     this._steps.changes.pipe(takeUntil(this._destroyed)).subscribe(() => this._stateChanged());
+
+    this._animationDone.pipe(
+      // This needs a `distinctUntilChanged` in order to avoid emitting the same event twice due
+      // to a bug in animations where the `.done` callback gets invoked twice on some browsers.
+      // See https://github.com/angular/angular/issues/24084
+      distinctUntilChanged((x, y) => x.fromState === y.fromState && x.toState === y.toState),
+      takeUntil(this._destroyed)
+    ).subscribe(event => {
+      if ((event.toState as StepContentPositionState) === 'current') {
+        this.animationDone.emit();
+      }
+    });
   }
 }
 
@@ -114,16 +133,24 @@ export class MatStepper extends CdkStepper implements AfterContentInit {
   inputs: ['selectedIndex'],
   host: {
     'class': 'mat-stepper-horizontal',
+    '[class.mat-stepper-label-position-end]': 'labelPosition == "end"',
+    '[class.mat-stepper-label-position-bottom]': 'labelPosition == "bottom"',
     'aria-orientation': 'horizontal',
     'role': 'tablist',
   },
   animations: [matStepperAnimations.horizontalStepTransition],
-  providers: [{provide: MatStepper, useExisting: MatHorizontalStepper}],
+  providers: [
+    {provide: MatStepper, useExisting: MatHorizontalStepper},
+    {provide: CdkStepper, useExisting: MatHorizontalStepper}
+  ],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class MatHorizontalStepper extends MatStepper { }
+export class MatHorizontalStepper extends MatStepper {
+  /** Whether the label should display in bottom or end position. */
+  @Input()
+  labelPosition: 'bottom' | 'end' = 'end';
+}
 
 @Component({
   moduleId: module.id,
@@ -138,14 +165,21 @@ export class MatHorizontalStepper extends MatStepper { }
     'role': 'tablist',
   },
   animations: [matStepperAnimations.verticalStepTransition],
-  providers: [{provide: MatStepper, useExisting: MatVerticalStepper}],
+  providers: [
+    {provide: MatStepper, useExisting: MatVerticalStepper},
+    {provide: CdkStepper, useExisting: MatVerticalStepper}
+  ],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MatVerticalStepper extends MatStepper {
-  constructor(@Optional() dir: Directionality, changeDetectorRef: ChangeDetectorRef) {
-    super(dir, changeDetectorRef);
+  constructor(
+    @Optional() dir: Directionality,
+    changeDetectorRef: ChangeDetectorRef,
+    // @breaking-change 8.0.0 `elementRef` and `_document` parameters to become required.
+    elementRef?: ElementRef<HTMLElement>,
+    @Inject(DOCUMENT) _document?: any) {
+    super(dir, changeDetectorRef, elementRef, _document);
     this._orientation = 'vertical';
   }
 }

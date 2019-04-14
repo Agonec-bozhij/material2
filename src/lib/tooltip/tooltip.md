@@ -18,7 +18,7 @@ the positions `before` and `after` should be used instead of `left` and `right`,
 | `left`    | Always display to the left of the element                                            |
 | `right`   | Always display to the right of the element                                           |
 | `before`  | Display to the left in left-to-right layout and to the right in right-to-left layout |
-| `after`   | Display to the right in left-to-right layout and to the right in right-to-left layout|
+| `after`   | Display to the right in left-to-right layout and to the left in right-to-left layout|
 
 <!-- example(tooltip-position) -->
 
@@ -66,4 +66,10 @@ shown.
 Elements with the `matTooltip` will add an `aria-describedby` label that provides a reference
 to a visually hidden element containing the tooltip's message. This provides screenreaders the
 information needed to read out the tooltip's contents when the end-user focuses on the element
-triggering the tooltip.
+triggering the tooltip. The element referenced via `aria-describedby` is not the tooltip itself,
+but instead an invisible copy of the tooltip content that is always present in the DOM.
+
+If a tooltip will only be shown manually via click, keypress, etc., then extra care should be taken
+such that the action behaves similarly for screen-reader users. One possible approach would be
+to use the `LiveAnnouncer` from the `cdk/a11y` package to announce the tooltip content on such
+an interaction.

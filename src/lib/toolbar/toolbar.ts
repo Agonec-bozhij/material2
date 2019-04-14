@@ -6,6 +6,8 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
+import {Platform} from '@angular/cdk/platform';
+import {DOCUMENT} from '@angular/common';
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
@@ -13,21 +15,21 @@ import {
   ContentChildren,
   Directive,
   ElementRef,
+  Inject,
   isDevMode,
   QueryList,
   ViewEncapsulation,
-  Inject,
 } from '@angular/core';
-import {CanColor, mixinColor} from '@angular/material/core';
-import {Platform} from '@angular/cdk/platform';
-import {DOCUMENT} from '@angular/common';
+import {CanColor, CanColorCtor, mixinColor} from '@angular/material/core';
+
 
 // Boilerplate for applying mixins to MatToolbar.
 /** @docs-private */
 export class MatToolbarBase {
   constructor(public _elementRef: ElementRef) {}
 }
-export const _MatToolbarMixinBase = mixinColor(MatToolbarBase);
+export const _MatToolbarMixinBase: CanColorCtor & typeof MatToolbarBase =
+    mixinColor(MatToolbarBase);
 
 @Directive({
   selector: 'mat-toolbar-row',
@@ -45,12 +47,11 @@ export class MatToolbarRow {}
   inputs: ['color'],
   host: {
     'class': 'mat-toolbar',
-    '[class.mat-toolbar-multiple-rows]': 'this._toolbarRows.length',
-    '[class.mat-toolbar-single-row]': '!this._toolbarRows.length'
+    '[class.mat-toolbar-multiple-rows]': '_toolbarRows.length > 0',
+    '[class.mat-toolbar-single-row]': '_toolbarRows.length === 0',
   },
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
 })
 export class MatToolbar extends _MatToolbarMixinBase implements CanColor, AfterViewInit {
   private _document: Document;
@@ -87,10 +88,10 @@ export class MatToolbar extends _MatToolbarMixinBase implements CanColor, AfterV
 
     // Check if there are any other DOM nodes that can display content but aren't inside of
     // a <mat-toolbar-row> element.
-    const isCombinedUsage = [].slice.call(this._elementRef.nativeElement.childNodes)
+    const isCombinedUsage = Array.from<HTMLElement>(this._elementRef.nativeElement.childNodes)
       .filter(node => !(node.classList && node.classList.contains('mat-toolbar-row')))
       .filter(node => node.nodeType !== (this._document ? this._document.COMMENT_NODE : 8))
-      .some(node => node.textContent.trim());
+      .some(node => !!(node.textContent && node.textContent.trim()));
 
     if (isCombinedUsage) {
       throwToolbarMixedModesError();

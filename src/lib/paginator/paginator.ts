@@ -18,8 +18,17 @@ import {
   Output,
   ViewEncapsulation,
 } from '@angular/core';
-import {Subscription} from 'rxjs/Subscription';
+import {Subscription} from 'rxjs';
 import {MatPaginatorIntl} from './paginator-intl';
+import {
+  HasInitialized,
+  HasInitializedCtor,
+  mixinInitialized,
+  ThemePalette,
+  mixinDisabled,
+  CanDisableCtor,
+  CanDisable,
+} from '@angular/material/core';
 
 /** The default page size if there is no page size and there are no provided page size options. */
 const DEFAULT_PAGE_SIZE = 50;
@@ -32,12 +41,24 @@ export class PageEvent {
   /** The current page index. */
   pageIndex: number;
 
+  /**
+   * Index of the page that was selected previously.
+   * @breaking-change 8.0.0 To be made into a required property.
+   */
+  previousPageIndex?: number;
+
   /** The current page size */
   pageSize: number;
 
   /** The current total number of items being paged */
   length: number;
 }
+
+// Boilerplate for applying mixins to MatPaginator.
+/** @docs-private */
+export class MatPaginatorBase {}
+export const _MatPaginatorBase: CanDisableCtor & HasInitializedCtor & typeof MatPaginatorBase =
+    mixinDisabled(mixinInitialized(MatPaginatorBase));
 
 /**
  * Component to provide navigation between paged information. Displays the size of the current
@@ -50,25 +71,29 @@ export class PageEvent {
   exportAs: 'matPaginator',
   templateUrl: 'paginator.html',
   styleUrls: ['paginator.css'],
+  inputs: ['disabled'],
   host: {
     'class': 'mat-paginator',
   },
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
 })
-export class MatPaginator implements OnInit, OnDestroy {
+export class MatPaginator extends _MatPaginatorBase implements OnInit, OnDestroy, CanDisable,
+  HasInitialized {
   private _initialized: boolean;
   private _intlChanges: Subscription;
+
+  /** Theme color to be used for the underlying form controls. */
+  @Input() color: ThemePalette;
 
   /** The zero-based page index of the displayed list of items. Defaulted to 0. */
   @Input()
   get pageIndex(): number { return this._pageIndex; }
   set pageIndex(value: number) {
-    this._pageIndex = coerceNumberProperty(value);
+    this._pageIndex = Math.max(coerceNumberProperty(value), 0);
     this._changeDetectorRef.markForCheck();
   }
-  _pageIndex: number = 0;
+  private _pageIndex = 0;
 
   /** The length of the total number of items that are being paginated. Defaulted to 0. */
   @Input()
@@ -77,13 +102,13 @@ export class MatPaginator implements OnInit, OnDestroy {
     this._length = coerceNumberProperty(value);
     this._changeDetectorRef.markForCheck();
   }
-  _length: number = 0;
+  private _length = 0;
 
   /** Number of items to display on a page. By default set to 50. */
   @Input()
   get pageSize(): number { return this._pageSize; }
   set pageSize(value: number) {
-    this._pageSize = coerceNumberProperty(value);
+    this._pageSize = Math.max(coerceNumberProperty(value), 0);
     this._updateDisplayedPageSizeOptions();
   }
   private _pageSize: number;
@@ -122,12 +147,14 @@ export class MatPaginator implements OnInit, OnDestroy {
 
   constructor(public _intl: MatPaginatorIntl,
               private _changeDetectorRef: ChangeDetectorRef) {
+    super();
     this._intlChanges = _intl.changes.subscribe(() => this._changeDetectorRef.markForCheck());
   }
 
   ngOnInit() {
     this._initialized = true;
     this._updateDisplayedPageSizeOptions();
+    this._markInitialized();
   }
 
   ngOnDestroy() {
@@ -137,31 +164,39 @@ export class MatPaginator implements OnInit, OnDestroy {
   /** Advances to the next page if it exists. */
   nextPage(): void {
     if (!this.hasNextPage()) { return; }
+
+    const previousPageIndex = this.pageIndex;
     this.pageIndex++;
-    this._emitPageEvent();
+    this._emitPageEvent(previousPageIndex);
   }
 
   /** Move back to the previous page if it exists. */
   previousPage(): void {
     if (!this.hasPreviousPage()) { return; }
+
+    const previousPageIndex = this.pageIndex;
     this.pageIndex--;
-    this._emitPageEvent();
+    this._emitPageEvent(previousPageIndex);
   }
 
   /** Move to the first page if not already there. */
   firstPage(): void {
     // hasPreviousPage being false implies at the start
     if (!this.hasPreviousPage()) { return; }
+
+    const previousPageIndex = this.pageIndex;
     this.pageIndex = 0;
-    this._emitPageEvent();
+    this._emitPageEvent(previousPageIndex);
   }
 
   /** Move to the last page if not already there. */
   lastPage(): void {
     // hasNextPage being false implies at the end
     if (!this.hasNextPage()) { return; }
-    this.pageIndex = this.getNumberOfPages();
-    this._emitPageEvent();
+
+    const previousPageIndex = this.pageIndex;
+    this.pageIndex = this.getNumberOfPages() - 1;
+    this._emitPageEvent(previousPageIndex);
   }
 
   /** Whether there is a previous page. */
@@ -171,13 +206,17 @@ export class MatPaginator implements OnInit, OnDestroy {
 
   /** Whether there is a next page. */
   hasNextPage(): boolean {
-    const numberOfPages = this.getNumberOfPages();
-    return this.pageIndex < numberOfPages && this.pageSize != 0;
+    const maxPageIndex = this.getNumberOfPages() - 1;
+    return this.pageIndex < maxPageIndex && this.pageSize != 0;
   }
 
   /** Calculate the number of pages */
   getNumberOfPages(): number {
-    return Math.ceil(this.length / this.pageSize) - 1;
+    if (!this.pageSize) {
+      return 0;
+    }
+
+    return Math.ceil(this.length / this.pageSize);
   }
 
 
@@ -193,10 +232,21 @@ export class MatPaginator implements OnInit, OnDestroy {
     // Current page needs to be updated to reflect the new page size. Navigate to the page
     // containing the previous page's first item.
     const startIndex = this.pageIndex * this.pageSize;
-    this.pageIndex = Math.floor(startIndex / pageSize) || 0;
+    const previousPageIndex = this.pageIndex;
 
+    this.pageIndex = Math.floor(startIndex / pageSize) || 0;
     this.pageSize = pageSize;
-    this._emitPageEvent();
+    this._emitPageEvent(previousPageIndex);
+  }
+
+  /** Checks whether the buttons for going forwards should be disabled. */
+  _nextButtonsDisabled() {
+    return this.disabled || !this.hasNextPage();
+  }
+
+  /** Checks whether the buttons for going backwards should be disabled. */
+  _previousButtonsDisabled() {
+    return this.disabled || !this.hasPreviousPage();
   }
 
   /**
@@ -214,19 +264,20 @@ export class MatPaginator implements OnInit, OnDestroy {
     }
 
     this._displayedPageSizeOptions = this.pageSizeOptions.slice();
-    if (this._displayedPageSizeOptions.indexOf(this.pageSize) == -1) {
+
+    if (this._displayedPageSizeOptions.indexOf(this.pageSize) === -1) {
       this._displayedPageSizeOptions.push(this.pageSize);
     }
 
     // Sort the numbers using a number-specific sort function.
     this._displayedPageSizeOptions.sort((a, b) => a - b);
-
     this._changeDetectorRef.markForCheck();
   }
 
   /** Emits an event notifying that a change of the paginator's properties has been triggered. */
-  private _emitPageEvent() {
+  private _emitPageEvent(previousPageIndex: number) {
     this.page.emit({
+      previousPageIndex,
       pageIndex: this.pageIndex,
       pageSize: this.pageSize,
       length: this.length

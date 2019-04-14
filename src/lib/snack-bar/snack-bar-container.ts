@@ -6,29 +6,30 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {
-  Component,
-  ComponentRef,
-  EmbeddedViewRef,
-  ViewChild,
-  NgZone,
-  OnDestroy,
-  ElementRef,
-  ChangeDetectionStrategy,
-  ViewEncapsulation,
-  ChangeDetectorRef,
-} from '@angular/core';
 import {AnimationEvent} from '@angular/animations';
 import {
   BasePortalOutlet,
-  ComponentPortal,
   CdkPortalOutlet,
+  ComponentPortal,
+  TemplatePortal,
 } from '@angular/cdk/portal';
-import {take} from 'rxjs/operators/take';
-import {Observable} from 'rxjs/Observable';
-import {Subject} from 'rxjs/Subject';
-import {MatSnackBarConfig} from './snack-bar-config';
+import {
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
+  Component,
+  ComponentRef,
+  ElementRef,
+  EmbeddedViewRef,
+  NgZone,
+  OnDestroy,
+  ViewChild,
+  ViewEncapsulation,
+} from '@angular/core';
+import {Observable, Subject} from 'rxjs';
+import {take} from 'rxjs/operators';
 import {matSnackBarAnimations} from './snack-bar-animations';
+import {MatSnackBarConfig} from './snack-bar-config';
+
 
 /**
  * Internal component that wraps user-provided snack bar content.
@@ -39,12 +40,15 @@ import {matSnackBarAnimations} from './snack-bar-animations';
   selector: 'snack-bar-container',
   templateUrl: 'snack-bar-container.html',
   styleUrls: ['snack-bar-container.css'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  // In Ivy embedded views will be change detected from their declaration place, rather than
+  // where they were stamped out. This means that we can't have the snack bar container be OnPush,
+  // because it might cause snack bars that were opened from a template not to be out of date.
+  // tslint:disable-next-line:validate-decorators
+  changeDetection: ChangeDetectionStrategy.Default,
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   animations: [matSnackBarAnimations.snackBarState],
   host: {
-    'role': 'alert',
+    '[attr.role]': '_role',
     'class': 'mat-snack-bar-container',
     '[@state]': '_animationState',
     '(@state.done)': 'onAnimationEnd($event)'
@@ -55,7 +59,7 @@ export class MatSnackBarContainer extends BasePortalOutlet implements OnDestroy 
   private _destroyed = false;
 
   /** The portal outlet inside of this container into which the snack bar content will be loaded. */
-  @ViewChild(CdkPortalOutlet) _portalOutlet: CdkPortalOutlet;
+  @ViewChild(CdkPortalOutlet, {static: true}) _portalOutlet: CdkPortalOutlet;
 
   /** Subject for notifying that the snack bar has exited from view. */
   readonly _onExit: Subject<any> = new Subject();
@@ -66,54 +70,52 @@ export class MatSnackBarContainer extends BasePortalOutlet implements OnDestroy 
   /** The state of the snack bar animations. */
   _animationState = 'void';
 
-  /** The snack bar configuration. */
-  snackBarConfig: MatSnackBarConfig;
+  /** ARIA role for the snack bar container. */
+  _role: 'alert' | 'status' | null;
 
   constructor(
     private _ngZone: NgZone,
-    private _elementRef: ElementRef,
-    private _changeDetectorRef: ChangeDetectorRef) {
+    private _elementRef: ElementRef<HTMLElement>,
+    private _changeDetectorRef: ChangeDetectorRef,
+    /** The snack bar configuration. */
+    public snackBarConfig: MatSnackBarConfig) {
+
     super();
+
+    // Based on the ARIA spec, `alert` and `status` roles have an
+    // implicit `assertive` and `polite` politeness respectively.
+    if (snackBarConfig.politeness === 'assertive' && !snackBarConfig.announcementMessage) {
+      this._role = 'alert';
+    } else if (snackBarConfig.politeness === 'off') {
+      this._role = null;
+    } else {
+      this._role = 'status';
+    }
   }
 
   /** Attach a component portal as content to this snack bar container. */
   attachComponentPortal<T>(portal: ComponentPortal<T>): ComponentRef<T> {
-    if (this._portalOutlet.hasAttached()) {
-      throw Error('Attempting to attach snack bar content after content is already attached');
-    }
-
-    const element: HTMLElement = this._elementRef.nativeElement;
-
-    if (this.snackBarConfig.panelClass || this.snackBarConfig.extraClasses) {
-      this._setCssClasses(this.snackBarConfig.panelClass);
-      this._setCssClasses(this.snackBarConfig.extraClasses);
-    }
-
-    if (this.snackBarConfig.horizontalPosition === 'center') {
-      element.classList.add('mat-snack-bar-center');
-    }
-
-    if (this.snackBarConfig.verticalPosition === 'top') {
-      element.classList.add('mat-snack-bar-top');
-    }
-
+    this._assertNotAttached();
+    this._applySnackBarClasses();
     return this._portalOutlet.attachComponentPortal(portal);
   }
 
   /** Attach a template portal as content to this snack bar container. */
-  attachTemplatePortal(): EmbeddedViewRef<any> {
-    throw Error('Not yet implemented');
+  attachTemplatePortal<C>(portal: TemplatePortal<C>): EmbeddedViewRef<C> {
+    this._assertNotAttached();
+    this._applySnackBarClasses();
+    return this._portalOutlet.attachTemplatePortal(portal);
   }
 
   /** Handle end of animations, updating the state of the snackbar. */
   onAnimationEnd(event: AnimationEvent) {
     const {fromState, toState} = event;
 
-    if ((toState === 'void' && fromState !== 'void') || toState.startsWith('hidden')) {
+    if ((toState === 'void' && fromState !== 'void') || toState === 'hidden') {
       this._completeExit();
     }
 
-    if (toState.startsWith('visible')) {
+    if (toState === 'visible') {
       // Note: we shouldn't use `this` inside the zone callback,
       // because it can cause a memory leak.
       const onEnter = this._onEnter;
@@ -128,14 +130,17 @@ export class MatSnackBarContainer extends BasePortalOutlet implements OnDestroy 
   /** Begin animation of snack bar entrance into view. */
   enter(): void {
     if (!this._destroyed) {
-      this._animationState = `visible-${this.snackBarConfig.verticalPosition}`;
+      this._animationState = 'visible';
       this._changeDetectorRef.detectChanges();
     }
   }
 
   /** Begin animation of the snack bar exiting from view. */
   exit(): Observable<void> {
-    this._animationState = `hidden-${this.snackBarConfig.verticalPosition}`;
+    // Note: this one transitions to `hidden`, rather than `void`, in order to handle the case
+    // where multiple snack bars are opened in quick succession (e.g. two consecutive calls to
+    // `MatSnackBar.open`).
+    this._animationState = 'hidden';
     return this._onExit;
   }
 
@@ -156,19 +161,33 @@ export class MatSnackBarContainer extends BasePortalOutlet implements OnDestroy 
     });
   }
 
-  /** Applies the user-specified list of CSS classes to the element. */
-  private _setCssClasses(classList: undefined|string|string[]) {
-    if (!classList) {
-      return;
+  /** Applies the various positioning and user-configured CSS classes to the snack bar. */
+  private _applySnackBarClasses() {
+    const element: HTMLElement = this._elementRef.nativeElement;
+    const panelClasses = this.snackBarConfig.panelClass;
+
+    if (panelClasses) {
+      if (Array.isArray(panelClasses)) {
+        // Note that we can't use a spread here, because IE doesn't support multiple arguments.
+        panelClasses.forEach(cssClass => element.classList.add(cssClass));
+      } else {
+        element.classList.add(panelClasses);
+      }
     }
 
-    const element = this._elementRef.nativeElement;
+    if (this.snackBarConfig.horizontalPosition === 'center') {
+      element.classList.add('mat-snack-bar-center');
+    }
 
-    if (Array.isArray(classList)) {
-      // Note that we can't use a spread here, because IE doesn't support multiple arguments.
-      classList.forEach(cssClass => element.classList.add(cssClass));
-    } else {
-      element.classList.add(classList);
+    if (this.snackBarConfig.verticalPosition === 'top') {
+      element.classList.add('mat-snack-bar-top');
+    }
+  }
+
+  /** Asserts that no content is already attached to the container. */
+  private _assertNotAttached() {
+    if (this._portalOutlet.hasAttached()) {
+      throw Error('Attempting to attach snack bar content after content is already attached');
     }
   }
 }

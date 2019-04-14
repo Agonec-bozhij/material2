@@ -2,6 +2,7 @@ import {
   async,
   ComponentFixture,
   fakeAsync,
+  flush,
   flushMicrotasks,
   inject,
   TestBed,
@@ -21,14 +22,19 @@ import {NoopAnimationsModule} from '@angular/platform-browser/animations';
 import {Direction, Directionality} from '@angular/cdk/bidi';
 import {OverlayContainer, OverlayModule, CdkScrollable} from '@angular/cdk/overlay';
 import {Platform} from '@angular/cdk/platform';
-import {dispatchFakeEvent, dispatchKeyboardEvent} from '@angular/cdk/testing';
+import {
+  dispatchFakeEvent,
+  dispatchKeyboardEvent,
+  patchElementFocus,
+  dispatchMouseEvent,
+} from '@angular/cdk/testing';
 import {ESCAPE} from '@angular/cdk/keycodes';
+import {FocusMonitor} from '@angular/cdk/a11y';
 import {
   MatTooltip,
   MatTooltipModule,
   SCROLL_THROTTLE_MS,
   TOOLTIP_PANEL_CLASS,
-  TooltipPosition,
   MAT_TOOLTIP_DEFAULT_OPTIONS,
 } from './index';
 
@@ -39,11 +45,12 @@ describe('MatTooltip', () => {
   let overlayContainer: OverlayContainer;
   let overlayContainerElement: HTMLElement;
   let dir: {value: Direction};
-  let platform: {IOS: boolean, isBrowser: boolean};
+  let platform: {IOS: boolean, isBrowser: boolean, ANDROID: boolean};
+  let focusMonitor: FocusMonitor;
 
   beforeEach(async(() => {
     // Set the default Platform override that can be updated before component creation.
-    platform = {IOS: false, isBrowser: true};
+    platform = {IOS: false, isBrowser: true, ANDROID: false};
 
     TestBed.configureTestingModule({
       imports: [MatTooltipModule, OverlayModule, NoopAnimationsModule],
@@ -52,7 +59,8 @@ describe('MatTooltip', () => {
         ScrollableTooltipDemo,
         OnPushTooltipDemo,
         DynamicTooltipsDemo,
-        TooltipOnTextFields
+        TooltipOnTextFields,
+        TooltipOnDraggableElement,
       ],
       providers: [
         {provide: Platform, useFactory: () => platform},
@@ -64,9 +72,10 @@ describe('MatTooltip', () => {
 
     TestBed.compileComponents();
 
-    inject([OverlayContainer], (oc: OverlayContainer) => {
+    inject([OverlayContainer, FocusMonitor], (oc: OverlayContainer, fm: FocusMonitor) => {
       overlayContainer = oc;
       overlayContainerElement = oc.getContainerElement();
+      focusMonitor = fm;
     })();
   }));
 
@@ -175,7 +184,8 @@ describe('MatTooltip', () => {
 
       fixture = TestBed.createComponent(BasicTooltipDemo);
       fixture.detectChanges();
-      tooltipDirective = fixture.debugElement.query(By.css('button')).injector.get(MatTooltip);
+      tooltipDirective = fixture.debugElement.query(By.css('button'))
+          .injector.get<MatTooltip>(MatTooltip);
 
       tooltipDirective.show();
       fixture.detectChanges();
@@ -194,6 +204,33 @@ describe('MatTooltip', () => {
       expect(tooltipDirective._isTooltipVisible()).toBe(false);
     }));
 
+    it('should be able to override the default position', fakeAsync(() => {
+      TestBed
+        .resetTestingModule()
+        .configureTestingModule({
+          imports: [MatTooltipModule, OverlayModule, NoopAnimationsModule],
+          declarations: [TooltipDemoWithoutPositionBinding],
+          providers: [{
+            provide: MAT_TOOLTIP_DEFAULT_OPTIONS,
+            useValue: {position: 'right'}
+          }]
+        })
+        .compileComponents();
+
+      const newFixture = TestBed.createComponent(TooltipDemoWithoutPositionBinding);
+      newFixture.detectChanges();
+      tooltipDirective = newFixture.debugElement.query(By.css('button'))
+          .injector.get<MatTooltip>(MatTooltip);
+
+      tooltipDirective.show();
+      newFixture.detectChanges();
+      tick();
+
+      expect(tooltipDirective.position).toBe('right');
+      expect(tooltipDirective._getOverlayPosition().main.overlayX).toBe('start');
+      expect(tooltipDirective._getOverlayPosition().fallback.overlayX).toBe('end');
+    }));
+
     it('should set a css class on the overlay panel element', fakeAsync(() => {
       tooltipDirective.show();
       fixture.detectChanges();
@@ -201,7 +238,7 @@ describe('MatTooltip', () => {
 
       const overlayRef = tooltipDirective._overlayRef;
 
-      expect(overlayRef).not.toBeNull();
+      expect(!!overlayRef).toBeTruthy();
       expect(overlayRef!.overlayElement.classList).toContain(TOOLTIP_PANEL_CLASS,
           'Expected the overlay panel element to have the tooltip panel class set.');
     }));
@@ -306,25 +343,48 @@ describe('MatTooltip', () => {
       expect(tooltipDirective._isTooltipVisible()).toBe(true);
     }));
 
-    it('should remove the tooltip when changing position', () => {
-      const initialPosition: TooltipPosition = 'below';
-      const changedPosition: TooltipPosition = 'above';
-
-      assertTooltipInstance(tooltipDirective, false);
-
-      tooltipDirective.position = initialPosition;
+    it('should be able to update the tooltip position while open', fakeAsync(() => {
+      tooltipDirective.position = 'below';
       tooltipDirective.show();
-      expect(tooltipDirective._tooltipInstance).toBeDefined();
+      tick();
 
-      // Same position value should not remove the tooltip
-      tooltipDirective.position = initialPosition;
-      expect(tooltipDirective._tooltipInstance).toBeDefined();
+      assertTooltipInstance(tooltipDirective, true);
 
-      // Different position value should destroy the tooltip
-      tooltipDirective.position = changedPosition;
-      assertTooltipInstance(tooltipDirective, false);
-      expect(tooltipDirective._overlayRef).toBeNull();
-    });
+      tooltipDirective.position = 'above';
+      spyOn(tooltipDirective._overlayRef!, 'updatePosition').and.callThrough();
+      fixture.detectChanges();
+      tick();
+
+      assertTooltipInstance(tooltipDirective, true);
+      expect(tooltipDirective._overlayRef!.updatePosition).toHaveBeenCalled();
+    }));
+
+    it('should not throw when updating the position for a closed tooltip', fakeAsync(() => {
+      tooltipDirective.position = 'left';
+      tooltipDirective.show(0);
+      fixture.detectChanges();
+      tick();
+
+      tooltipDirective.hide(0);
+      fixture.detectChanges();
+      tick();
+
+      // At this point the animation should be able to complete itself and trigger the
+      // _animationDone function, but for unknown reasons in the test infrastructure,
+      // this does not occur. Manually call the hook so the animation subscriptions get invoked.
+      tooltipDirective._tooltipInstance!._animationDone({
+        fromState: 'visible',
+        toState: 'hidden',
+        totalTime: 150,
+        phaseName: 'done',
+      } as AnimationEvent);
+
+      expect(() => {
+        tooltipDirective.position = 'right';
+        fixture.detectChanges();
+        tick();
+      }).not.toThrow();
+    }));
 
     it('should be able to modify the tooltip message', fakeAsync(() => {
       assertTooltipInstance(tooltipDirective, false);
@@ -420,6 +480,24 @@ describe('MatTooltip', () => {
       } as AnimationEvent);
     }));
 
+    it('should complete the afterHidden stream when tooltip is destroyed', fakeAsync(() => {
+      tooltipDirective.show();
+      fixture.detectChanges();
+      tick(150);
+
+      const spy = jasmine.createSpy('complete spy');
+      const subscription = tooltipDirective._tooltipInstance!.afterHidden()
+          .subscribe(undefined, undefined, spy);
+
+      tooltipDirective.hide(0);
+      tick(0);
+      fixture.detectChanges();
+      tick(500);
+
+      expect(spy).toHaveBeenCalled();
+      subscription.unsubscribe();
+    }));
+
     it('should consistently position before and after overlay origin in ltr and rtl dir', () => {
       tooltipDirective.position = 'left';
       const leftOrigin = tooltipDirective._getOrigin().main;
@@ -432,12 +510,12 @@ describe('MatTooltip', () => {
       tooltipDirective.position = 'after';
       expect(tooltipDirective._getOrigin().main).toEqual(rightOrigin);
 
-      // Test expectations in LTR
+      // Test expectations in RTL
       dir.value = 'rtl';
       tooltipDirective.position = 'before';
-      expect(tooltipDirective._getOrigin().main).toEqual(rightOrigin);
-      tooltipDirective.position = 'after';
       expect(tooltipDirective._getOrigin().main).toEqual(leftOrigin);
+      tooltipDirective.position = 'after';
+      expect(tooltipDirective._getOrigin().main).toEqual(rightOrigin);
     });
 
     it('should consistently position before and after overlay position in ltr and rtl dir', () => {
@@ -452,52 +530,12 @@ describe('MatTooltip', () => {
       tooltipDirective.position = 'after';
       expect(tooltipDirective._getOverlayPosition().main).toEqual(rightOverlayPosition);
 
-      // Test expectations in LTR
+      // Test expectations in RTL
       dir.value = 'rtl';
       tooltipDirective.position = 'before';
-      expect(tooltipDirective._getOverlayPosition().main).toEqual(rightOverlayPosition);
-      tooltipDirective.position = 'after';
       expect(tooltipDirective._getOverlayPosition().main).toEqual(leftOverlayPosition);
-    });
-
-    it('should have consistent left transform origin in any dir', () => {
-      tooltipDirective.position = 'right';
-      tooltipDirective.show();
-      fixture.detectChanges();
-      expect(tooltipDirective._tooltipInstance!._transformOrigin).toBe('left');
-
       tooltipDirective.position = 'after';
-      tooltipDirective.show();
-      fixture.detectChanges();
-      expect(tooltipDirective._tooltipInstance!._transformOrigin).toBe('left');
-
-      dir.value = 'rtl';
-      tooltipDirective.position = 'before';
-      tooltipDirective.show();
-      fixture.detectChanges();
-      expect(tooltipDirective._tooltipInstance!._transformOrigin).toBe('left');
-    });
-
-    it('should have consistent right transform origin in any dir', () => {
-      // Move the button away from the edge of the screen so
-      // we don't get into the fallback positions.
-      fixture.componentInstance.button.nativeElement.style.margin = '300px';
-
-      tooltipDirective.position = 'left';
-      tooltipDirective.show();
-      fixture.detectChanges();
-      expect(tooltipDirective._tooltipInstance!._transformOrigin).toBe('right');
-
-      tooltipDirective.position = 'before';
-      tooltipDirective.show();
-      fixture.detectChanges();
-      expect(tooltipDirective._tooltipInstance!._transformOrigin).toBe('right');
-
-      dir.value = 'rtl';
-      tooltipDirective.position = 'after';
-      tooltipDirective.show();
-      fixture.detectChanges();
-      expect(tooltipDirective._tooltipInstance!._transformOrigin).toBe('right');
+      expect(tooltipDirective._getOverlayPosition().main).toEqual(rightOverlayPosition);
     });
 
     it('should throw when trying to assign an invalid position', () => {
@@ -515,10 +553,38 @@ describe('MatTooltip', () => {
       tick(0);
       fixture.detectChanges();
 
-      const tooltipWrapper = overlayContainerElement.querySelector('.cdk-overlay-pane')!;
+      const tooltipWrapper =
+          overlayContainerElement.querySelector('.cdk-overlay-connected-position-bounding-box')!;
 
       expect(tooltipWrapper).toBeTruthy('Expected tooltip to be shown.');
       expect(tooltipWrapper.getAttribute('dir')).toBe('rtl', 'Expected tooltip to be in RTL mode.');
+    }));
+
+    it('should keep the overlay direction in sync with the trigger direction', fakeAsync(() => {
+      dir.value = 'rtl';
+      tooltipDirective.show();
+      tick(0);
+      fixture.detectChanges();
+      tick(500);
+
+      let tooltipWrapper =
+          overlayContainerElement.querySelector('.cdk-overlay-connected-position-bounding-box')!;
+      expect(tooltipWrapper.getAttribute('dir')).toBe('rtl', 'Expected tooltip to be in RTL.');
+
+      tooltipDirective.hide(0);
+      tick(0);
+      fixture.detectChanges();
+      tick(500);
+
+      dir.value = 'ltr';
+      tooltipDirective.show();
+      tick(0);
+      fixture.detectChanges();
+      tick(500);
+
+      tooltipWrapper =
+          overlayContainerElement.querySelector('.cdk-overlay-connected-position-bounding-box')!;
+      expect(tooltipWrapper.getAttribute('dir')).toBe('ltr', 'Expected tooltip to be in LTR.');
     }));
 
     it('should be able to set the tooltip message as a number', fakeAsync(() => {
@@ -541,6 +607,7 @@ describe('MatTooltip', () => {
       tick(0);
       fixture.detectChanges();
       tick(500);
+      fixture.detectChanges();
 
       expect(tooltipDirective._isTooltipVisible()).toBe(false);
       expect(overlayContainerElement.textContent).toBe('');
@@ -564,13 +631,15 @@ describe('MatTooltip', () => {
         fixture.detectChanges();
       }).not.toThrow();
 
-      tick(0);
+      // Flush due to the additional tick that is necessary for the FocusMonitor.
+      flush();
     }));
 
     it('should not show the tooltip on progammatic focus', fakeAsync(() => {
+      patchElementFocus(buttonElement);
       assertTooltipInstance(tooltipDirective, false);
 
-      buttonElement.focus();
+      focusMonitor.focusVia(buttonElement, 'program');
       tick(0);
       fixture.detectChanges();
       tick(500);
@@ -578,6 +647,49 @@ describe('MatTooltip', () => {
       expect(overlayContainerElement.querySelector('.mat-tooltip')).toBeNull();
     }));
 
+    it('should not show the tooltip on mouse focus', fakeAsync(() => {
+      patchElementFocus(buttonElement);
+      assertTooltipInstance(tooltipDirective, false);
+
+      focusMonitor.focusVia(buttonElement, 'mouse');
+      tick(0);
+      fixture.detectChanges();
+      tick(500);
+
+      expect(overlayContainerElement.querySelector('.mat-tooltip')).toBeNull();
+    }));
+
+    it('should not show the tooltip on touch focus', fakeAsync(() => {
+      patchElementFocus(buttonElement);
+      assertTooltipInstance(tooltipDirective, false);
+
+      focusMonitor.focusVia(buttonElement, 'touch');
+      tick(0);
+      fixture.detectChanges();
+      tick(500);
+
+      expect(overlayContainerElement.querySelector('.mat-tooltip')).toBeNull();
+    }));
+
+    it('should not hide the tooltip when calling `show` twice in a row', fakeAsync(() => {
+      tooltipDirective.show();
+      tick(0);
+      expect(tooltipDirective._isTooltipVisible()).toBe(true);
+      fixture.detectChanges();
+      tick(500);
+
+      const overlayRef = tooltipDirective._overlayRef!;
+
+      spyOn(overlayRef, 'detach').and.callThrough();
+
+      tooltipDirective.show();
+      tick(0);
+      expect(tooltipDirective._isTooltipVisible()).toBe(true);
+      fixture.detectChanges();
+      tick(500);
+
+      expect(overlayRef.detach).not.toHaveBeenCalled();
+    }));
 
   });
 
@@ -631,14 +743,12 @@ describe('MatTooltip', () => {
   describe('scrollable usage', () => {
     let fixture: ComponentFixture<ScrollableTooltipDemo>;
     let buttonDebugElement: DebugElement;
-    let buttonElement: HTMLButtonElement;
     let tooltipDirective: MatTooltip;
 
     beforeEach(() => {
       fixture = TestBed.createComponent(ScrollableTooltipDemo);
       fixture.detectChanges();
       buttonDebugElement = fixture.debugElement.query(By.css('button'));
-      buttonElement = <HTMLButtonElement> buttonDebugElement.nativeElement;
       tooltipDirective = buttonDebugElement.injector.get<MatTooltip>(MatTooltip);
     });
 
@@ -746,9 +856,8 @@ describe('MatTooltip', () => {
   });
 
   describe('special cases', () => {
-    it('should clear the `user-select` when a tooltip is set on a text field in iOS', () => {
-      platform.IOS = true;
 
+    it('should clear the `user-select` when a tooltip is set on a text field', () => {
       const fixture = TestBed.createComponent(TooltipOnTextFields);
       const instance = fixture.componentInstance;
 
@@ -756,10 +865,45 @@ describe('MatTooltip', () => {
 
       expect(instance.input.nativeElement.style.userSelect).toBeFalsy();
       expect(instance.input.nativeElement.style.webkitUserSelect).toBeFalsy();
+      expect(instance.input.nativeElement.style.msUserSelect).toBeFalsy();
 
       expect(instance.textarea.nativeElement.style.userSelect).toBeFalsy();
       expect(instance.textarea.nativeElement.style.webkitUserSelect).toBeFalsy();
+      expect(instance.textarea.nativeElement.style.msUserSelect).toBeFalsy();
     });
+
+    it('should clear the `-webkit-user-drag` on draggable elements', () => {
+      const fixture = TestBed.createComponent(TooltipOnDraggableElement);
+
+      fixture.detectChanges();
+
+      expect(fixture.componentInstance.button.nativeElement.style.webkitUserDrag).toBeFalsy();
+    });
+
+    it('should not open on `mouseenter` on iOS', () => {
+      platform.IOS = true;
+
+      const fixture = TestBed.createComponent(BasicTooltipDemo);
+
+      fixture.detectChanges();
+      dispatchMouseEvent(fixture.componentInstance.button.nativeElement, 'mouseenter');
+      fixture.detectChanges();
+
+      assertTooltipInstance(fixture.componentInstance.tooltip, false);
+    });
+
+    it('should not open on `mouseenter` on Android', () => {
+      platform.ANDROID = true;
+
+      const fixture = TestBed.createComponent(BasicTooltipDemo);
+
+      fixture.detectChanges();
+      dispatchMouseEvent(fixture.componentInstance.button.nativeElement, 'mouseenter');
+      fixture.detectChanges();
+
+      assertTooltipInstance(fixture.componentInstance.tooltip, false);
+    });
+
   });
 
 });
@@ -780,8 +924,8 @@ class BasicTooltipDemo {
   message: any = initialTooltipMessage;
   showButton: boolean = true;
   showTooltipClass = false;
-  @ViewChild(MatTooltip) tooltip: MatTooltip;
-  @ViewChild('button') button: ElementRef;
+  @ViewChild(MatTooltip, {static: false}) tooltip: MatTooltip;
+  @ViewChild('button', {static: false}) button: ElementRef<HTMLButtonElement>;
 }
 
 @Component({
@@ -801,7 +945,7 @@ class ScrollableTooltipDemo {
  message: string = initialTooltipMessage;
  showButton: boolean = true;
 
- @ViewChild(CdkScrollable) scrollingContainer: CdkScrollable;
+ @ViewChild(CdkScrollable, {static: false}) scrollingContainer: CdkScrollable;
 
  scrollDown() {
      const scrollingContainerEl = this.scrollingContainer.getElementRef().nativeElement;
@@ -840,7 +984,7 @@ class OnPushTooltipDemo {
 class DynamicTooltipsDemo {
   tooltips: Array<string> = [];
 
-  constructor(private _elementRef: ElementRef) {}
+  constructor(private _elementRef: ElementRef<HTMLElement>) {}
 
   getButtons() {
     return this._elementRef.nativeElement.querySelectorAll('button');
@@ -861,8 +1005,31 @@ class DynamicTooltipsDemo {
   `,
 })
 class TooltipOnTextFields {
-  @ViewChild('input') input: ElementRef;
-  @ViewChild('textarea') textarea: ElementRef;
+  @ViewChild('input', {static: false}) input: ElementRef<HTMLInputElement>;
+  @ViewChild('textarea', {static: false}) textarea: ElementRef<HTMLTextAreaElement>;
+}
+
+@Component({
+  template: `
+    <button
+      #button
+      style="-webkit-user-drag: none;"
+      draggable="true"
+      matTooltip="Drag me"></button>
+  `,
+})
+class TooltipOnDraggableElement {
+  @ViewChild('button', {static: false}) button: ElementRef;
+}
+
+@Component({
+  selector: 'app',
+  template: `<button #button [matTooltip]="message">Button</button>`
+})
+class TooltipDemoWithoutPositionBinding {
+  message: any = initialTooltipMessage;
+  @ViewChild(MatTooltip, {static: false}) tooltip: MatTooltip;
+  @ViewChild('button', {static: false}) button: ElementRef<HTMLButtonElement>;
 }
 
 /** Asserts whether a tooltip directive has a tooltip instance. */

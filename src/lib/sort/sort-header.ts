@@ -6,29 +6,32 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
+import {coerceBooleanProperty} from '@angular/cdk/coercion';
 import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
   Input,
+  OnDestroy,
+  OnInit,
   Optional,
-  ViewEncapsulation
+  ViewEncapsulation,
+  Inject,
 } from '@angular/core';
-import {coerceBooleanProperty} from '@angular/cdk/coercion';
-import {CdkColumnDef} from '@angular/cdk/table';
-import {Subscription} from 'rxjs/Subscription';
-import {merge} from 'rxjs/observable/merge';
+import {CanDisable, CanDisableCtor, mixinDisabled} from '@angular/material/core';
+import {merge, Subscription} from 'rxjs';
 import {MatSort, MatSortable} from './sort';
-import {SortDirection} from './sort-direction';
-import {MatSortHeaderIntl} from './sort-header-intl';
-import {getSortHeaderNotContainedWithinSortError} from './sort-errors';
-import {CanDisable, mixinDisabled} from '@angular/material/core';
 import {matSortAnimations} from './sort-animations';
+import {SortDirection} from './sort-direction';
+import {getSortHeaderNotContainedWithinSortError} from './sort-errors';
+import {MatSortHeaderIntl} from './sort-header-intl';
+
 
 // Boilerplate for applying mixins to the sort header.
 /** @docs-private */
 export class MatSortHeaderBase {}
-export const _MatSortHeaderMixinBase = mixinDisabled(MatSortHeaderBase);
+export const _MatSortHeaderMixinBase: CanDisableCtor & typeof MatSortHeaderBase =
+    mixinDisabled(MatSortHeaderBase);
 
 /**
  * Valid positions for the arrow to be in for its opacity and translation. If the state is a
@@ -48,6 +51,11 @@ export type ArrowViewState = SortDirection | 'hint' | 'active';
 export interface ArrowViewStateTransition {
   fromState?: ArrowViewState;
   toState: ArrowViewState;
+}
+
+/** Column definition associated with a `MatSortHeader`. */
+interface MatSortHeaderColumnDef {
+  name: string;
 }
 
 /**
@@ -70,10 +78,10 @@ export interface ArrowViewStateTransition {
     '(mouseenter)': '_setIndicatorHintVisible(true)',
     '(longpress)': '_setIndicatorHintVisible(true)',
     '(mouseleave)': '_setIndicatorHintVisible(false)',
+    '[attr.aria-sort]': '_getAriaSortAttribute()',
     '[class.mat-sort-header-disabled]': '_isDisabled()',
   },
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
   inputs: ['disabled'],
   animations: [
@@ -85,7 +93,8 @@ export interface ArrowViewStateTransition {
     matSortAnimations.allowChildren,
   ]
 })
-export class MatSortHeader extends _MatSortHeaderMixinBase implements MatSortable, CanDisable {
+export class MatSortHeader extends _MatSortHeaderMixinBase
+    implements CanDisable, MatSortable, OnDestroy, OnInit {
   private _rerenderSubscription: Subscription;
 
   /**
@@ -130,8 +139,12 @@ export class MatSortHeader extends _MatSortHeaderMixinBase implements MatSortabl
   constructor(public _intl: MatSortHeaderIntl,
               changeDetectorRef: ChangeDetectorRef,
               @Optional() public _sort: MatSort,
-              @Optional() public _cdkColumnDef: CdkColumnDef) {
-
+              @Inject('MAT_SORT_HEADER_COLUMN_DEF') @Optional()
+                  public _columnDef: MatSortHeaderColumnDef) {
+    // Note that we use a string token for the `_columnDef`, because the value is provided both by
+    // `material/table` and `cdk/table` and we can't have the CDK depending on Material,
+    // and we want to avoid having the sort header depending on the CDK table because
+    // of this single reference.
     super();
 
     if (!_sort) {
@@ -155,8 +168,8 @@ export class MatSortHeader extends _MatSortHeaderMixinBase implements MatSortabl
   }
 
   ngOnInit() {
-    if (!this.id && this._cdkColumnDef) {
-      this.id = this._cdkColumnDef.name;
+    if (!this.id && this._columnDef) {
+      this.id = this._columnDef.name;
     }
 
     // Initialize the direction of the arrow and set the view state to be immediately that state.
@@ -263,5 +276,22 @@ export class MatSortHeader extends _MatSortHeaderMixinBase implements MatSortabl
 
   _isDisabled() {
     return this._sort.disabled || this.disabled;
+  }
+
+  /**
+   * Gets the aria-sort attribute that should be applied to this sort header. If this header
+   * is not sorted, returns null so that the attribute is removed from the host element. Aria spec
+   * says that the aria-sort property should only be present on one header at a time, so removing
+   * ensures this is true.
+   */
+  _getAriaSortAttribute() {
+    if (!this._isSorted()) { return null; }
+
+    return this._sort.direction == 'asc' ? 'ascending' : 'descending';
+  }
+
+  /** Whether the arrow inside the sort header should be rendered. */
+  _renderArrow() {
+    return !this._isDisabled() || this._isSorted();
   }
 }

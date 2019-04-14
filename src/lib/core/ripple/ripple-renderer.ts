@@ -6,7 +6,8 @@
  * found in the LICENSE file at https://angular.io/license
  */
 import {ElementRef, NgZone} from '@angular/core';
-import {Platform, supportsPassiveEventListeners} from '@angular/cdk/platform';
+import {Platform, normalizePassiveListenerOptions} from '@angular/cdk/platform';
+import {isFakeMousedownFromScreenReader} from '@angular/cdk/a11y';
 import {RippleRef, RippleState} from './ripple-ref';
 
 export type RippleConfig = {
@@ -16,8 +17,6 @@ export type RippleConfig = {
   persistent?: boolean;
   animation?: RippleAnimationConfig;
   terminateOnPointerUp?: boolean;
-  /** @deprecated Use the animation property instead. */
-  speedFactor?: number;
 };
 
 /**
@@ -58,6 +57,9 @@ export const defaultRippleAnimationConfig = {
  */
 const ignoreMouseEventsTimeout = 800;
 
+/** Options that apply to all the event listeners that are bound by the ripple renderer. */
+const passiveEventOptions = normalizePassiveListenerOptions({passive: true});
+
 /**
  * Helper service that performs DOM manipulations. Not intended to be used outside this module.
  * The constructor takes a reference to the ripple directive's host element and a map of DOM
@@ -66,7 +68,6 @@ const ignoreMouseEventsTimeout = 800;
  * @docs-private
  */
 export class RippleRenderer {
-
   /** Element where the ripples are being added to. */
   private _containerElement: HTMLElement;
 
@@ -82,15 +83,21 @@ export class RippleRenderer {
   /** Set of currently active ripple references. */
   private _activeRipples = new Set<RippleRef>();
 
+  /** Latest non-persistent ripple that was triggered. */
+  private _mostRecentTransientRipple: RippleRef | null;
+
   /** Time in milliseconds when the last touchstart event happened. */
   private _lastTouchStartEvent: number;
 
-  /** Options that apply to all the event listeners that are bound by the renderer. */
-  private _eventOptions = supportsPassiveEventListeners() ? ({passive: true} as any) : false;
+  /**
+   * Cached dimensions of the ripple container. Set when the first
+   * ripple is shown and cleared once no more ripples are visible.
+   */
+  private _containerRect: ClientRect | null;
 
   constructor(private _target: RippleTarget,
               private _ngZone: NgZone,
-              elementRef: ElementRef,
+              elementRef: ElementRef<HTMLElement>,
               platform: Platform) {
 
     // Only do anything if we're on the browser.
@@ -98,12 +105,14 @@ export class RippleRenderer {
       this._containerElement = elementRef.nativeElement;
 
       // Specify events which need to be registered on the trigger.
-      this._triggerEvents.set('mousedown', this.onMousedown);
-      this._triggerEvents.set('mouseup', this.onPointerUp);
-      this._triggerEvents.set('mouseleave', this.onPointerUp);
+      this._triggerEvents
+        .set('mousedown', this.onMousedown)
+        .set('mouseup', this.onPointerUp)
+        .set('mouseleave', this.onPointerUp)
 
-      this._triggerEvents.set('touchstart', this.onTouchStart);
-      this._triggerEvents.set('touchend', this.onPointerUp);
+        .set('touchstart', this.onTouchStart)
+        .set('touchend', this.onPointerUp)
+        .set('touchcancel', this.onPointerUp);
     }
   }
 
@@ -114,7 +123,8 @@ export class RippleRenderer {
    * @param config Extra ripple options.
    */
   fadeInRipple(x: number, y: number, config: RippleConfig = {}): RippleRef {
-    const containerRect = this._containerElement.getBoundingClientRect();
+    const containerRect = this._containerRect =
+                          this._containerRect || this._containerElement.getBoundingClientRect();
     const animationConfig = {...defaultRippleAnimationConfig, ...config.animation};
 
     if (config.centered) {
@@ -125,7 +135,7 @@ export class RippleRenderer {
     const radius = config.radius || distanceToFurthestCorner(x, y, containerRect);
     const offsetX = x - containerRect.left;
     const offsetY = y - containerRect.top;
-    const duration = animationConfig.enterDuration / (config.speedFactor || 1);
+    const duration = animationConfig.enterDuration;
 
     const ripple = document.createElement('div');
     ripple.classList.add('mat-ripple-element');
@@ -155,12 +165,22 @@ export class RippleRenderer {
     // Add the ripple reference to the list of all active ripples.
     this._activeRipples.add(rippleRef);
 
+    if (!config.persistent) {
+      this._mostRecentTransientRipple = rippleRef;
+    }
+
     // Wait for the ripple element to be completely faded in.
     // Once it's faded in, the ripple can be hidden immediately if the mouse is released.
     this.runTimeoutOutsideZone(() => {
+      const isMostRecentTransientRipple = rippleRef === this._mostRecentTransientRipple;
+
       rippleRef.state = RippleState.VISIBLE;
 
-      if (!config.persistent && !this._isPointerDown) {
+      // When the timer runs out while the user has kept their pointer down, we want to
+      // keep only the persistent ripples and the latest transient ripple. We do this,
+      // because we don't want stacked transient ripples to appear after their enter
+      // animation has finished.
+      if (!config.persistent && (!isMostRecentTransientRipple || !this._isPointerDown)) {
         rippleRef.fadeOut();
       }
     }, duration);
@@ -170,8 +190,19 @@ export class RippleRenderer {
 
   /** Fades out a ripple reference. */
   fadeOutRipple(rippleRef: RippleRef) {
-    // For ripples that are not active anymore, don't re-un the fade-out animation.
-    if (!this._activeRipples.delete(rippleRef)) {
+    const wasActive = this._activeRipples.delete(rippleRef);
+
+    if (rippleRef === this._mostRecentTransientRipple) {
+      this._mostRecentTransientRipple = null;
+    }
+
+    // Clear out the cached bounding rect if we have no more ripples.
+    if (!this._activeRipples.size) {
+      this._containerRect = null;
+    }
+
+    // For ripples that are not active anymore, don't re-run the fade-out animation.
+    if (!wasActive) {
       return;
     }
 
@@ -180,7 +211,6 @@ export class RippleRenderer {
 
     rippleEl.style.transitionDuration = `${animationConfig.exitDuration}ms`;
     rippleEl.style.opacity = '0';
-
     rippleRef.state = RippleState.FADING_OUT;
 
     // Once the ripple faded out, the ripple can be safely removed from the DOM.
@@ -205,8 +235,9 @@ export class RippleRenderer {
     this._removeTriggerEvents();
 
     this._ngZone.runOutsideAngular(() => {
-      this._triggerEvents.forEach((fn, type) =>
-          element.addEventListener(type, fn, this._eventOptions));
+      this._triggerEvents.forEach((fn, type) => {
+        element.addEventListener(type, fn, passiveEventOptions);
+      });
     });
 
     this._triggerElement = element;
@@ -214,10 +245,13 @@ export class RippleRenderer {
 
   /** Function being called whenever the trigger is being pressed using mouse. */
   private onMousedown = (event: MouseEvent) => {
+    // Screen readers will fire fake mouse events for space/enter. Skip launching a
+    // ripple in this case for consistency with the non-screen-reader experience.
+    const isFakeMousedown = isFakeMousedownFromScreenReader(event);
     const isSyntheticEvent = this._lastTouchStartEvent &&
         Date.now() < this._lastTouchStartEvent + ignoreMouseEventsTimeout;
 
-    if (!this._target.rippleDisabled && !isSyntheticEvent) {
+    if (!this._target.rippleDisabled && !isFakeMousedown && !isSyntheticEvent) {
       this._isPointerDown = true;
       this.fadeInRipple(event.clientX, event.clientY, this._target.rippleConfig);
     }
@@ -232,8 +266,13 @@ export class RippleRenderer {
       this._lastTouchStartEvent = Date.now();
       this._isPointerDown = true;
 
-      this.fadeInRipple(
-          event.touches[0].clientX, event.touches[0].clientY, this._target.rippleConfig);
+      // Use `changedTouches` so we skip any touches where the user put
+      // their finger down, but used another finger to tap the element again.
+      const touches = event.changedTouches;
+
+      for (let i = 0; i < touches.length; i++) {
+        this.fadeInRipple(touches[i].clientX, touches[i].clientY, this._target.rippleConfig);
+      }
     }
   }
 
@@ -267,7 +306,7 @@ export class RippleRenderer {
   _removeTriggerEvents() {
     if (this._triggerElement) {
       this._triggerEvents.forEach((fn, type) => {
-        this._triggerElement!.removeEventListener(type, fn, this._eventOptions);
+        this._triggerElement!.removeEventListener(type, fn, passiveEventOptions);
       });
     }
   }

@@ -40,8 +40,12 @@ export class ConnectionPositionPair {
   constructor(
     origin: OriginConnectionPosition,
     overlay: OverlayConnectionPosition,
+    /** Offset along the X axis. */
     public offsetX?: number,
-    public offsetY?: number) {
+    /** Offset along the Y axis. */
+    public offsetY?: number,
+    /** Class(es) to be applied to the panel while this position is active. */
+    public panelClass?: string | string[]) {
 
     this.originX = origin.originX;
     this.originY = origin.originY;
@@ -89,4 +93,30 @@ export class ConnectedOverlayPositionChange {
       public connectionPair: ConnectionPositionPair,
       /** @docs-private */
       @Optional() public scrollableViewProperties: ScrollingVisibility) {}
+}
+
+/**
+ * Validates whether a vertical position property matches the expected values.
+ * @param property Name of the property being validated.
+ * @param value Value of the property being validated.
+ * @docs-private
+ */
+export function validateVerticalPosition(property: string, value: VerticalConnectionPos) {
+  if (value !== 'top' && value !== 'bottom' && value !== 'center') {
+    throw Error(`ConnectedPosition: Invalid ${property} "${value}". ` +
+                `Expected "top", "bottom" or "center".`);
+  }
+}
+
+/**
+ * Validates whether a horizontal position property matches the expected values.
+ * @param property Name of the property being validated.
+ * @param value Value of the property being validated.
+ * @docs-private
+ */
+export function validateHorizontalPosition(property: string, value: HorizontalConnectionPos) {
+  if (value !== 'start' && value !== 'end' && value !== 'center') {
+    throw Error(`ConnectedPosition: Invalid ${property} "${value}". ` +
+                `Expected "start", "end" or "center".`);
+  }
 }

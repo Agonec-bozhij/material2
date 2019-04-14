@@ -2,23 +2,25 @@
 @import '../core/style/button-common';
 @import '../core/style/layout-common';
 @import '../core/style/menu-common';
-@import '../core/style/layout-common';
 @import '../../cdk/a11y/a11y';
 
 $mat-menu-vertical-padding: 8px !default;
-$mat-menu-border-radius: 2px !default;
+$mat-menu-border-radius: 4px !default;
 $mat-menu-submenu-indicator-size: 10px !default;
 
 .mat-menu-panel {
-  @include mat-menu-base(2);
-  @include mat-menu-positions();
+  @include mat-menu-base();
   max-height: calc(100vh - #{$mat-menu-item-height});
   border-radius: $mat-menu-border-radius;
   outline: 0;
 
-  // Prevent the user from interacting while the panel is still animating.
-  // This avoids issues where the user could accidentally open a sub-menu,
-  // because of the `overlapTrigger` option.
+  // Prevent users from interacting with the panel while it's animating. Note that
+  // people won't be able to click through it, because the overlay pane will catch the click.
+  // This fixes the following issues:
+  //  * Users accidentally opening sub-menus when the `overlapTrigger` option is enabled.
+  //  * Users accidentally tapping on content inside the sub-menu on touch devices, if the
+  //    sub-menu overlaps the trigger. The issue is due to touch devices emulating the
+  //    `mouseenter` event by dispatching it on tap.
   &.ng-animating {
     pointer-events: none;
   }
@@ -28,7 +30,8 @@ $mat-menu-submenu-indicator-size: 10px !default;
   }
 }
 
-.mat-menu-content {
+// `:not(:empty)` allows for the menu to collapse to 0x0 when it doesn't have content.
+.mat-menu-content:not(:empty) {
   padding-top: $mat-menu-vertical-padding;
   padding-bottom: $mat-menu-vertical-padding;
 }
@@ -38,8 +41,12 @@ $mat-menu-submenu-indicator-size: 10px !default;
   @include mat-menu-item-base();
   position: relative;
 
-  .mat-icon {
-    vertical-align: middle;
+  @include cdk-high-contrast {
+    &.cdk-program-focused,
+    &.cdk-keyboard-focused,
+    &-highlighted {
+      outline: dotted 1px;
+    }
   }
 }
 
@@ -80,7 +87,9 @@ button.mat-menu-item {
   width: 100%;
 }
 
-.mat-menu-ripple {
+// Increase specificity because ripple styles are part of the `mat-core` mixin and can
+// potentially overwrite the absolute position of the container.
+.mat-menu-item .mat-menu-ripple {
   @include mat-fill;
 
   // Prevent any pointer events on the ripple container for a menu item. The ripple container is

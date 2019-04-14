@@ -18,6 +18,11 @@
   @return _mat-get-type-value($config, $level, font-weight);
 }
 
+// Gets the letter spacing for a level inside a typography config.
+@function mat-letter-spacing($config, $level) {
+  @return _mat-get-type-value($config, $level, letter-spacing);
+}
+
 // Gets the font-family from a typography config and removes the quotes around it.
 @function mat-font-family($config, $level: null) {
   $font-family: map-get($config, font-family);
@@ -26,7 +31,8 @@
     $font-family: _mat-get-type-value($config, $level, font-family);
   }
 
-  @return if($font-family == null, $font-family, unquote($font-family));
+  // Guard against unquoting non-string values, because it's deprecated.
+  @return if(type-of($font-family) == string, unquote($font-family), $font-family);
 }
 
 // Outputs the shorthand `font` CSS property, based on a set of typography values. Falls back to
@@ -64,4 +70,5 @@
   $font-family: mat-font-family($config, $level);
 
   @include mat-typography-font-shorthand($font-size, $font-weight, $line-height, $font-family);
+  letter-spacing: mat-letter-spacing($config, $level);
 }

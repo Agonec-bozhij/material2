@@ -21,15 +21,17 @@ import {
   ViewContainerRef,
   ViewEncapsulation,
 } from '@angular/core';
-import {CanDisable, mixinDisabled} from '@angular/material/core';
-import {Subject} from 'rxjs/Subject';
+import {CanDisable, CanDisableCtor, mixinDisabled} from '@angular/material/core';
+import {Subject} from 'rxjs';
+import {MatTabContent} from './tab-content';
 import {MatTabLabel} from './tab-label';
 
 
 // Boilerplate for applying mixins to MatTab.
 /** @docs-private */
 export class MatTabBase {}
-export const _MatTabMixinBase = mixinDisabled(MatTabBase);
+export const _MatTabMixinBase: CanDisableCtor & typeof MatTabBase =
+    mixinDisabled(MatTabBase);
 
 @Component({
   moduleId: module.id,
@@ -38,20 +40,34 @@ export const _MatTabMixinBase = mixinDisabled(MatTabBase);
   inputs: ['disabled'],
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   exportAs: 'matTab',
 })
 export class MatTab extends _MatTabMixinBase implements OnInit, CanDisable, OnChanges, OnDestroy {
   /** Content for the tab label given by `<ng-template mat-tab-label>`. */
-  @ContentChild(MatTabLabel) templateLabel: MatTabLabel;
+  @ContentChild(MatTabLabel, {static: false}) templateLabel: MatTabLabel;
+
+  /**
+   * Template provided in the tab content that will be used if present, used to enable lazy-loading
+   */
+  @ContentChild(MatTabContent, {read: TemplateRef, static: true})
+  _explicitContent: TemplateRef<any>;
 
   /** Template inside the MatTab view that contains an `<ng-content>`. */
-  @ViewChild(TemplateRef) _content: TemplateRef<any>;
+  @ViewChild(TemplateRef, {static: true}) _implicitContent: TemplateRef<any>;
 
-  /** The plain text label for the tab, used when there is no template label. */
+  /** Plain text label for the tab, used when there is no template label. */
   @Input('label') textLabel: string = '';
 
-  /** The portal that will be the hosted content of the tab */
+  /** Aria label for the tab. */
+  @Input('aria-label') ariaLabel: string;
+
+  /**
+   * Reference to the element that the tab is labelled by.
+   * Will be cleared if `aria-label` is set at the same time.
+   */
+  @Input('aria-labelledby') ariaLabelledby: string;
+
+  /** Portal that will be the hosted content of the tab */
   private _contentPortal: TemplatePortal | null = null;
 
   /** @docs-private */
@@ -59,11 +75,8 @@ export class MatTab extends _MatTabMixinBase implements OnInit, CanDisable, OnCh
     return this._contentPortal;
   }
 
-  /** Emits whenever the label changes. */
-  readonly _labelChange = new Subject<void>();
-
-  /** Emits whenever the disable changes */
-  readonly _disableChange = new Subject<void>();
+  /** Emits whenever the internal state of the tab changes. */
+  readonly _stateChanges = new Subject<void>();
 
   /**
    * The relatively indexed position where 0 represents the center, negative is left, and positive
@@ -87,21 +100,17 @@ export class MatTab extends _MatTabMixinBase implements OnInit, CanDisable, OnCh
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes.hasOwnProperty('textLabel')) {
-      this._labelChange.next();
-    }
-
-    if (changes.hasOwnProperty('disabled')) {
-      this._disableChange.next();
+    if (changes.hasOwnProperty('textLabel') || changes.hasOwnProperty('disabled')) {
+      this._stateChanges.next();
     }
   }
 
   ngOnDestroy(): void {
-    this._disableChange.complete();
-    this._labelChange.complete();
+    this._stateChanges.complete();
   }
 
   ngOnInit(): void {
-    this._contentPortal = new TemplatePortal(this._content, this._viewContainerRef);
+    this._contentPortal = new TemplatePortal(
+        this._explicitContent || this._implicitContent, this._viewContainerRef);
   }
 }

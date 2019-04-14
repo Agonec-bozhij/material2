@@ -1,44 +1,53 @@
 package(default_visibility=["//visibility:public"])
-load("@angular//:index.bzl", "ng_module")
-load("@io_bazel_rules_sass//sass:sass.bzl", "sass_library", "sass_binary")
 
+load("@io_bazel_rules_sass//:defs.bzl", "sass_library", "sass_binary")
+load("//tools:defaults.bzl", "ng_module", "ng_test_library", "ng_web_test_suite",
+  "markdown_to_html")
 
 ng_module(
   name = "datepicker",
   srcs = glob(["**/*.ts"], exclude=["**/*.spec.ts"]),
   module_name = "@angular/material/datepicker",
   assets = [
-    ":datepicker_content_css",
-    ":datepicker_toggle_css",
-    ":calendar_body_css",
-    ":calendar_css",
-  ],
+    ":datepicker-content.css",
+    ":datepicker-toggle.css",
+    ":calendar-body.css",
+    ":calendar.css",
+  ] + glob(["**/*.html"]),
   deps = [
-    "//src/lib/core",
-    "//src/lib/button",
-    "//src/lib/dialog",
-    "//src/lib/input",
+    "@npm//@angular/animations",
+    "@npm//@angular/common",
+    "@npm//@angular/core",
+    "@npm//@angular/forms",
+    "@npm//rxjs",
     "//src/cdk/a11y",
     "//src/cdk/bidi",
     "//src/cdk/coercion",
     "//src/cdk/keycodes",
-    "//src/cdk/portal",
     "//src/cdk/overlay",
+    "//src/cdk/portal",
+    "//src/lib/button",
+    "//src/lib/core",
+    "//src/lib/dialog",
+    "//src/lib/form-field",
+    "//src/lib/input",
   ],
-  tsconfig = ":tsconfig-build.json",
 )
 
+sass_library(
+  name = "datepicker_scss_lib",
+  srcs = glob(["**/_*.scss"]),
+  deps = ["//src/lib/core:core_scss_lib"],
+)
 
 sass_binary(
   name = "datepicker_content_scss",
   src = "datepicker-content.scss",
-  deps = ["//src/lib/core:core_scss_lib"],
 )
 
 sass_binary(
   name = "datepicker_toggle_scss",
   src = "datepicker-toggle.scss",
-  deps = ["//src/lib/core:core_scss_lib"],
 )
 
 sass_binary(
@@ -50,41 +59,41 @@ sass_binary(
 sass_binary(
   name = "calendar_body_scss",
   src = "calendar-body.scss",
-  deps = ["//src/lib/core:core_scss_lib"],
+  deps = ["//src/cdk/a11y:a11y_scss_lib"],
 )
 
-# TODO(jelbourn): remove this when sass_binary supports specifying an output filename and dir.
-# Copy the output of the sass_binary such that the filename and path match what we expect.
-genrule(
-  name = "datepicker_content_css",
-  srcs = [":datepicker_content_scss"],
-  outs = ["datepicker-content.css"],
-  cmd = "cat $(locations :datepicker_content_scss) > $@",
+ng_test_library(
+  name = "datepicker_test_sources",
+  srcs = glob(["**/*.spec.ts"]),
+  deps = [
+    "@npm//@angular/forms",
+    "@npm//@angular/platform-browser",
+    "@npm//@angular/platform-browser-dynamic",
+    "@npm//rxjs",
+    "//src/cdk/bidi",
+    "//src/cdk/keycodes",
+    "//src/cdk/overlay",
+    "//src/cdk/scrolling",
+    "//src/cdk/testing",
+    "//src/lib/core",
+    "//src/lib/form-field",
+    "//src/lib/input",
+    "//src/lib/testing",
+    ":datepicker",
+  ]
 )
 
-# TODO(jelbourn): remove this when sass_binary supports specifying an output filename and dir.
-# Copy the output of the sass_binary such that the filename and path match what we expect.
-genrule(
-  name = "datepicker_toggle_css",
-  srcs = [":datepicker_toggle_scss"],
-  outs = ["datepicker-toggle.css"],
-  cmd = "cat $(locations :datepicker_toggle_scss) > $@",
+ng_web_test_suite(
+  name = "unit_tests",
+  deps = [":datepicker_test_sources"],
 )
 
-# TODO(jelbourn): remove this when sass_binary supports specifying an output filename and dir.
-# Copy the output of the sass_binary such that the filename and path match what we expect.
-genrule(
-  name = "calendar_css",
-  srcs = [":calendar_scss"],
-  outs = ["calendar.css"],
-  cmd = "cat $(locations :calendar_scss) > $@",
+markdown_to_html(
+  name = "overview",
+  srcs = [":datepicker.md"],
 )
 
-# TODO(jelbourn): remove this when sass_binary supports specifying an output filename and dir.
-# Copy the output of the sass_binary such that the filename and path match what we expect.
-genrule(
-  name = "calendar_body_css",
-  srcs = [":calendar_body_scss"],
-  outs = ["calendar-body.css"],
-  cmd = "cat $(locations :calendar_body_scss) > $@",
+filegroup(
+  name = "source-files",
+  srcs = glob(["**/*.ts"]),
 )

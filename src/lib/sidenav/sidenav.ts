@@ -17,10 +17,13 @@ import {
   Input,
   ViewEncapsulation,
   QueryList,
+  ElementRef,
+  NgZone,
 } from '@angular/core';
 import {MatDrawer, MatDrawerContainer, MatDrawerContent} from './drawer';
 import {matDrawerAnimations} from './drawer-animations';
 import {coerceBooleanProperty, coerceNumberProperty} from '@angular/cdk/coercion';
+import {ScrollDispatcher} from '@angular/cdk/scrolling';
 
 
 @Component({
@@ -29,18 +32,20 @@ import {coerceBooleanProperty, coerceNumberProperty} from '@angular/cdk/coercion
   template: '<ng-content></ng-content>',
   host: {
     'class': 'mat-drawer-content mat-sidenav-content',
-    '[style.margin-left.px]': '_margins.left',
-    '[style.margin-right.px]': '_margins.right',
+    '[style.margin-left.px]': '_container._contentMargins.left',
+    '[style.margin-right.px]': '_container._contentMargins.right',
   },
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
 })
 export class MatSidenavContent extends MatDrawerContent {
   constructor(
       changeDetectorRef: ChangeDetectorRef,
-      @Inject(forwardRef(() => MatSidenavContainer)) container: MatSidenavContainer) {
-    super(changeDetectorRef, container);
+      @Inject(forwardRef(() => MatSidenavContainer)) container: MatSidenavContainer,
+      elementRef: ElementRef<HTMLElement>,
+      scrollDispatcher: ScrollDispatcher,
+      ngZone: NgZone) {
+    super(changeDetectorRef, container, elementRef, scrollDispatcher, ngZone);
   }
 }
 
@@ -49,15 +54,14 @@ export class MatSidenavContent extends MatDrawerContent {
   moduleId: module.id,
   selector: 'mat-sidenav',
   exportAs: 'matSidenav',
-  template: '<ng-content></ng-content>',
+  templateUrl: 'drawer.html',
   animations: [matDrawerAnimations.transformDrawer],
   host: {
     'class': 'mat-drawer mat-sidenav',
     'tabIndex': '-1',
     '[@transform]': '_animationState',
-    '(@transform.start)': '_onAnimationStart($event)',
-    '(@transform.done)': '_onAnimationEnd($event)',
-    '(keydown)': 'handleKeydown($event)',
+    '(@transform.start)': '_animationStarted.next($event)',
+    '(@transform.done)': '_animationEnd.next($event)',
     // must prevent the browser from aligning text based on value
     '[attr.align]': 'null',
     '[class.mat-drawer-end]': 'position === "end"',
@@ -70,7 +74,6 @@ export class MatSidenavContent extends MatDrawerContent {
   },
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
 })
 export class MatSidenav extends MatDrawer {
   /** Whether the sidenav is fixed in the viewport. */
@@ -107,12 +110,12 @@ export class MatSidenav extends MatDrawer {
   styleUrls: ['drawer.css'],
   host: {
     'class': 'mat-drawer-container mat-sidenav-container',
+    '[class.mat-drawer-container-explicit-backdrop]': '_backdropOverride',
   },
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
 })
 export class MatSidenavContainer extends MatDrawerContainer {
   @ContentChildren(MatSidenav) _drawers: QueryList<MatSidenav>;
-  @ContentChild(MatSidenavContent) _content: MatSidenavContent;
+  @ContentChild(MatSidenavContent, {static: false}) _content: MatSidenavContent;
 }

@@ -11,14 +11,17 @@ import {
   ViewEncapsulation,
   ElementRef,
   Input,
+  Optional,
   ContentChildren,
   QueryList,
   AfterContentInit,
   Directive,
   ChangeDetectionStrategy,
+  Inject,
 } from '@angular/core';
-import {MatLine, MatLineSetter} from '@angular/material/core';
-import {coerceToNumber} from './grid-list-measure';
+import {MatLine, setLines} from '@angular/material/core';
+import {coerceNumberProperty} from '@angular/cdk/coercion';
+import {MAT_GRID_LIST, MatGridListBase} from './grid-list-base';
 
 @Component({
   moduleId: module.id,
@@ -30,31 +33,32 @@ import {coerceToNumber} from './grid-list-measure';
   templateUrl: 'grid-tile.html',
   styleUrls: ['grid-list.css'],
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MatGridTile {
   _rowspan: number = 1;
   _colspan: number = 1;
 
-  constructor(private _element: ElementRef) {}
+  constructor(
+    private _element: ElementRef<HTMLElement>,
+    @Optional() @Inject(MAT_GRID_LIST) public _gridList?: MatGridListBase) {}
 
   /** Amount of rows that the grid tile takes up. */
   @Input()
   get rowspan(): number { return this._rowspan; }
-  set rowspan(value: number) { this._rowspan = coerceToNumber(value); }
+  set rowspan(value: number) { this._rowspan = Math.round(coerceNumberProperty(value)); }
 
   /** Amount of columns that the grid tile takes up. */
   @Input()
   get colspan(): number { return this._colspan; }
-  set colspan(value: number) { this._colspan = coerceToNumber(value); }
+  set colspan(value: number) { this._colspan = Math.round(coerceNumberProperty(value)); }
 
   /**
    * Sets the style of the grid-tile element.  Needs to be set manually to avoid
    * "Changed after checked" errors that would occur with HostBinding.
    */
   _setStyle(property: string, value: any): void {
-    this._element.nativeElement.style[property] = value;
+    (this._element.nativeElement.style as any)[property] = value;
   }
 }
 
@@ -64,20 +68,14 @@ export class MatGridTile {
   templateUrl: 'grid-tile-text.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
 })
 export class MatGridTileText implements AfterContentInit {
-  /**
-   *  Helper that watches the number of lines in a text area and sets
-   * a class on the host element that matches the line count.
-   */
-  _lineSetter: MatLineSetter;
   @ContentChildren(MatLine) _lines: QueryList<MatLine>;
 
-  constructor(private _element: ElementRef) {}
+  constructor(private _element: ElementRef<HTMLElement>) {}
 
   ngAfterContentInit() {
-    this._lineSetter = new MatLineSetter(this._lines, this._element);
+    setLines(this._lines, this._element);
   }
 }
 

@@ -16,6 +16,7 @@ import {coerceBooleanProperty} from '@angular/cdk/coercion';
     'role': 'separator',
     '[attr.aria-orientation]': 'vertical ? "vertical" : "horizontal"',
     '[class.mat-divider-vertical]': 'vertical',
+    '[class.mat-divider-horizontal]': '!vertical',
     '[class.mat-divider-inset]': 'inset',
     'class': 'mat-divider'
   },
@@ -23,7 +24,6 @@ import {coerceBooleanProperty} from '@angular/cdk/coercion';
   styleUrls: ['divider.css'],
   encapsulation: ViewEncapsulation.None,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  preserveWhitespaces: false,
 })
 export class MatDivider {
   /** Whether the divider is vertically aligned. */

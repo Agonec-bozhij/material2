@@ -3,54 +3,45 @@ For help getting started with a new Angular app, check out the
 
 For existing apps, follow these steps to begin using Angular Material.
 
-### Step 1: Install Angular Material and Angular CDK
+### Step 1: Install Angular Material, Angular CDK and Angular Animations
 
 You can use either the npm or yarn command-line tool to install packages. Use whichever is appropriate for your project in the examples below.
 
 #### NPM
 ```bash
-npm install --save @angular/material @angular/cdk
+npm install --save @angular/material @angular/cdk @angular/animations
 ```
 #### Yarn
 ```bash
-yarn add @angular/material @angular/cdk
+yarn add @angular/material @angular/cdk @angular/animations
 ```
 
 
-#### Alternative: Snapshot Build
+#### Alternative 1: Snapshot Build
 
 A snapshot build with the latest changes from master is also available. Note that this snapshot
 build should not be considered stable and may break between releases.
 
 #### NPM
 ```bash
-npm install --save angular/material2-builds angular/cdk-builds
+npm install --save angular/material2-builds angular/cdk-builds angular/animations-builds
 ```
 
 #### Yarn
 ```bash
-yarn add angular/material2-builds angular/cdk-builds
+yarn add angular/material2-builds angular/cdk-builds angular/animations-builds
 ```
+#### Alternative 2: Angular Devkit 6+
 
-### Step 2: Animations
+Using the Angular CLI `ng add` command will update your Angular project with the correct dependencies, perform configuration changes and execute initialization code. 
 
-Some Material components depend on the Angular animations module in order to be able to do
-more advanced transitions. If you want these animations to work in your app, you have to
-install the `@angular/animations` module and include the `BrowserAnimationsModule` in your app.
-
-#### NPM
 ```bash
-npm install --save @angular/animations
+ng add @angular/material
 ```
 
-#### Yarn
-```bash
-yarn add @angular/animations
-```
+### Step 2: Configure animations
 
-**Note:** `@angular/animations` uses the WebAnimation API that isn't supported by all browsers yet.
-If you want to support Material component animations in these browsers, you'll have to
-[include a polyfill](https://github.com/web-animations/web-animations-js).
+Once the animations package is installed, import `BrowserAnimationsModule` into your application to enable animations support.
 
 ```ts
 import {BrowserAnimationsModule} from '@angular/platform-browser/animations';
@@ -63,7 +54,7 @@ import {BrowserAnimationsModule} from '@angular/platform-browser/animations';
 export class PizzaPartyAppModule { }
 ```
 
-If you don't want to add another dependency to your project, you can use the `NoopAnimationsModule`.
+Alternatively, you can disable animations by importing `NoopAnimationsModule`.
 
 ```ts
 import {NoopAnimationsModule} from '@angular/platform-browser/animations';
@@ -91,9 +82,7 @@ import {MatButtonModule, MatCheckboxModule} from '@angular/material';
 export class PizzaPartyAppModule { }
 ```
 
-Alternatively, you can create a separate NgModule that imports all of the
-Angular Material components that you will use in your application. You can then
-include this module wherever you'd like to use the components.
+Alternatively, you can create a separate NgModule that imports and then re-exports all of the Anguar Material components that you will use in your application. By exporting them again, other modules can simply include your `CustomMaterialModule` wherever Material components are needed, and automatically get all of the exported Material modules. A good place for importing/exporting the application-wide Material modules is the [SharedModule](https://angular.io/guide/ngmodule-faq#sharedmodule).
 
 ```ts
 import {MatButtonModule, MatCheckboxModule} from '@angular/material';
@@ -189,6 +178,12 @@ System.config({
     '@angular/cdk/platform': 'npm:@angular/cdk/bundles/cdk-platform.umd.js',
     '@angular/cdk/a11y': 'npm:@angular/cdk/bundles/cdk-a11y.umd.js',
     // ...
+    'hammerjs': 'npm:hammerjs',
+  },
+  packages: {
+    //...
+    hammerjs: {main: './hammer.min.js', defaultExtension: 'js'}
+    //...
   }
 });
 ```

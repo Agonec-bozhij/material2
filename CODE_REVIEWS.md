@@ -3,12 +3,11 @@
 * Before any coding begins on new, large, or breaking work, a design discussion should take place.
 * All code changes require a review and approval.
 * All behaviors should be covered by unit tests in the same PR.
-* Large changes should be accompanied by corresponding e2e tests in the same PR. 
+* Large changes should be accompanied by corresponding e2e tests in the same PR.
 * Authors should attempt to keep PRs to 200 - 300 line changes.
- 
+
 ## Workflow
 1. The code author sends a PR for review. This request should include:
-  * A mention of the intended reviewer(s) (e.g., `@jelbourn`)
   * A high-level description of the change being made.
   * Links to any relevant issues.
   * Screenshots (for visual changes or new additions)
@@ -25,7 +24,7 @@ greatly in keeping the library stable by running against the tests of many appli
 Google. Due to the volume of tests involved, this process means that there can be some delay
 between a PR being approved and it being merged.
 
-The "merge safe" label means that the change doesn't affect the library itself (or the demo-app),
+The "merge safe" label means that the change doesn't affect the library itself (or the dev-app),
 and thus can be merged without this extra presubmit.
 
 The "presubmit failure" label means that the PR has encountered some failure during presubmit and

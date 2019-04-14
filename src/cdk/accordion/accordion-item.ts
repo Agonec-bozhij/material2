@@ -14,10 +14,12 @@ import {
   OnDestroy,
   Optional,
   ChangeDetectorRef,
+  SkipSelf,
 } from '@angular/core';
 import {UniqueSelectionDispatcher} from '@angular/cdk/collections';
 import {CdkAccordion} from './accordion';
 import {coerceBooleanProperty} from '@angular/cdk/coercion';
+import {Subscription} from 'rxjs';
 
 /** Used to generate unique ID for each accordion item. */
 let nextId = 0;
@@ -27,10 +29,17 @@ let nextId = 0;
  * events and attributes needed to be managed by a CdkAccordion parent.
  */
 @Directive({
-  selector: 'cdk-accordion-item',
+  selector: 'cdk-accordion-item, [cdkAccordionItem]',
   exportAs: 'cdkAccordionItem',
+  providers: [
+    // Provide CdkAccordion as undefined to prevent nested accordion items from registering
+    // to the same accordion.
+    {provide: CdkAccordion, useValue: undefined},
+  ],
 })
 export class CdkAccordionItem implements OnDestroy {
+  /** Subscription to openAll/closeAll events. */
+  private _openCloseAllSubscription = Subscription.EMPTY;
   /** Event emitted every time the AccordionItem is closed. */
   @Output() closed: EventEmitter<void> = new EventEmitter<void>();
   /** Event emitted every time the AccordionItem is opened. */
@@ -87,7 +96,7 @@ export class CdkAccordionItem implements OnDestroy {
   /** Unregister function for _expansionDispatcher. */
   private _removeUniqueSelectionListener: () => void = () => {};
 
-  constructor(@Optional() public accordion: CdkAccordion,
+  constructor(@Optional() @SkipSelf() public accordion: CdkAccordion,
               private _changeDetectorRef: ChangeDetectorRef,
               protected _expansionDispatcher: UniqueSelectionDispatcher) {
     this._removeUniqueSelectionListener =
@@ -97,12 +106,21 @@ export class CdkAccordionItem implements OnDestroy {
           this.expanded = false;
         }
       });
+
+    // When an accordion item is hosted in an accordion, subscribe to open/close events.
+    if (this.accordion) {
+      this._openCloseAllSubscription = this._subscribeToOpenCloseAllActions();
+    }
   }
 
   /** Emits an event for the accordion item being destroyed. */
   ngOnDestroy() {
+    this.opened.complete();
+    this.closed.complete();
     this.destroyed.emit();
+    this.destroyed.complete();
     this._removeUniqueSelectionListener();
+    this._openCloseAllSubscription.unsubscribe();
   }
 
   /** Toggles the expanded state of the accordion item. */
@@ -124,5 +142,14 @@ export class CdkAccordionItem implements OnDestroy {
     if (!this.disabled) {
       this.expanded = true;
     }
+  }
+
+  private _subscribeToOpenCloseAllActions(): Subscription {
+    return this.accordion._openCloseAllActions.subscribe(expanded => {
+      // Only change expanded state if item is enabled
+      if (!this.disabled) {
+        this.expanded = expanded;
+      }
+    });
   }
 }

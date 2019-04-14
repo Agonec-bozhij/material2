@@ -1,14 +1,14 @@
 import {Platform} from '@angular/cdk/platform';
 import {LOCALE_ID} from '@angular/core';
 import {async, inject, TestBed} from '@angular/core/testing';
-import {DEC, FEB, JAN, MAR} from '../testing/month-constants';
+import {DEC, FEB, JAN, MAR} from '@angular/material/testing';
 import {DateAdapter, MAT_DATE_LOCALE, NativeDateAdapter, NativeDateModule} from './index';
 
 const SUPPORTS_INTL = typeof Intl != 'undefined';
 
 
 describe('NativeDateAdapter', () => {
-  const platform = new Platform();
+  let platform: Platform;
   let adapter: NativeDateAdapter;
   let assertValidDate: (d: Date | null, valid: boolean) => void;
 
@@ -18,8 +18,10 @@ describe('NativeDateAdapter', () => {
     }).compileComponents();
   }));
 
-  beforeEach(inject([DateAdapter], (dateAdapter: NativeDateAdapter) => {
+  beforeEach(inject([DateAdapter, Platform],
+    (dateAdapter: NativeDateAdapter, _platform: Platform) => {
     adapter = dateAdapter;
+    platform = _platform;
 
     assertValidDate = (d: Date | null, valid: boolean) => {
       expect(adapter.isDateInstance(d)).not.toBeNull(`Expected ${d} to be a date instance`);
@@ -52,7 +54,7 @@ describe('NativeDateAdapter', () => {
     ]);
   });
 
-  it('should get long month names', () => {
+  it('should get short month names', () => {
     expect(adapter.getMonthNames('short')).toEqual([
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ]);
@@ -284,6 +286,12 @@ describe('NativeDateAdapter', () => {
 
   it('should clone', () => {
     let date = new Date(2017, JAN, 1);
+    expect(adapter.clone(date)).toEqual(date);
+    expect(adapter.clone(date)).not.toBe(date);
+  });
+
+  it('should preserve time when cloning', () => {
+    let date = new Date(2017, JAN, 1, 4, 5, 6);
     expect(adapter.clone(date)).toEqual(date);
     expect(adapter.clone(date)).not.toBe(date);
   });

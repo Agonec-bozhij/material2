@@ -7,13 +7,16 @@ import {MatSnackBar} from '@angular/material';
 @Component({
   selector: 'snack-bar-component-example',
   templateUrl: 'snack-bar-component-example.html',
+  styleUrls: ['snack-bar-component-example.css'],
 })
 export class SnackBarComponentExample {
-  constructor(public snackBar: MatSnackBar) {}
+  durationInSeconds = 5;
+
+  constructor(private snackBar: MatSnackBar) {}
 
   openSnackBar() {
     this.snackBar.openFromComponent(PizzaPartyComponent, {
-      duration: 500,
+      duration: this.durationInSeconds * 1000,
     });
   }
 }
@@ -22,6 +25,10 @@ export class SnackBarComponentExample {
 @Component({
   selector: 'snack-bar-component-example-snack',
   templateUrl: 'snack-bar-component-example-snack.html',
-  styles: [`.example-pizza-party { color: hotpink; }`],
+  styles: [`
+    .example-pizza-party {
+      color: hotpink;
+    }
+  `],
 })
 export class PizzaPartyComponent {}

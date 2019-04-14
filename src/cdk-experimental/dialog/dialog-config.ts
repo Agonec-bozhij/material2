@@ -42,9 +42,6 @@ export class DialogConfig<D = any> {
   /** Custom class(es) for the overlay panel. */
   panelClass?: string | string[] = '';
 
-  /** Custom class(es) for the dialog container. */
-  containerClass?: string | string[] = '';
-
   /** Whether the dialog has a background. */
   hasBackdrop?: boolean = true;
 
@@ -79,7 +76,7 @@ export class DialogConfig<D = any> {
   data?: D | null = null;
 
   /** The layout direction for the dialog content. */
-  direction?: Direction = 'ltr';
+  direction?: Direction;
 
   /** ID of the element that describes the dialog. */
   ariaDescribedBy?: string | null = null;
@@ -89,4 +86,10 @@ export class DialogConfig<D = any> {
 
   /** Whether the dialog should focus the first focusable element on open. */
   autoFocus?: boolean = true;
+
+  /** Duration of the enter animation. Has to be a valid CSS value (e.g. 100ms). */
+  enterAnimationDuration?: string = '225ms';
+
+  /** Duration of the exit animation. Has to be a valid CSS value (e.g. 50ms). */
+  exitAnimationDuration?: string = '225ms';
 }

@@ -20,6 +20,7 @@ describe('AriaDescriber', () => {
     fixture = TestBed.createComponent(TestApp);
     component = fixture.componentInstance;
     ariaDescriber = component.ariaDescriber;
+    fixture.detectChanges();
   });
 
   afterEach(() => {
@@ -38,6 +39,15 @@ describe('AriaDescriber', () => {
   it('should not register empty strings', () => {
     ariaDescriber.describe(component.element1, '');
     expect(getMessageElements()).toBe(null);
+  });
+
+  it('should not register non-string values', () => {
+    expect(() => ariaDescriber.describe(component.element1, null!)).not.toThrow();
+    expect(getMessageElements()).toBe(null);
+  });
+
+  it('should not throw when trying to remove non-string value', () => {
+    expect(() => ariaDescriber.removeDescription(component.element1, null!)).not.toThrow();
   });
 
   it('should de-dupe a message registered multiple times', () => {
@@ -112,6 +122,24 @@ describe('AriaDescriber', () => {
     const node: any = document.createComment('Not an element node');
     expect(() => ariaDescriber.describe(node, 'This looks like an element')).not.toThrow();
   });
+
+  it('should clear any pre-existing containers', () => {
+    const extraContainer = document.createElement('div');
+    extraContainer.id = MESSAGES_CONTAINER_ID;
+    document.body.appendChild(extraContainer);
+
+    ariaDescriber.describe(component.element1, 'Hello');
+
+    // Use `querySelectorAll` with an attribute since `getElementById` will stop at the first match.
+    expect(document.querySelectorAll(`[id='${MESSAGES_CONTAINER_ID}']`).length).toBe(1);
+  });
+
+  it('should not describe messages that match up with the aria-label of the element', () => {
+    component.element1.setAttribute('aria-label', 'Hello');
+    ariaDescriber.describe(component.element1, 'Hello');
+    ariaDescriber.describe(component.element1, 'Hi');
+    expectMessages(['Hi']);
+  });
 });
 
 function getMessagesContainer() {
@@ -161,16 +189,16 @@ function expectMessage(el: Element, message: string) {
   `,
 })
 class TestApp {
-  @ViewChild('element1') _element1: ElementRef;
+  @ViewChild('element1', {static: false}) _element1: ElementRef<HTMLElement>;
   get element1(): Element { return this._element1.nativeElement; }
 
-  @ViewChild('element2') _element2: ElementRef;
+  @ViewChild('element2', {static: false}) _element2: ElementRef<HTMLElement>;
   get element2(): Element { return this._element2.nativeElement; }
 
-  @ViewChild('element3') _element3: ElementRef;
+  @ViewChild('element3', {static: false}) _element3: ElementRef<HTMLElement>;
   get element3(): Element { return this._element3.nativeElement; }
 
-  @ViewChild('element4') _element4: ElementRef;
+  @ViewChild('element4', {static: false}) _element4: ElementRef<HTMLElement>;
   get element4(): Element { return this._element4.nativeElement; }
 
 

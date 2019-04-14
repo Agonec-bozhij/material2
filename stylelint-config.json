@@ -1,16 +1,26 @@
 {
   "plugins": [
     "./tools/stylelint/no-prefixes/no-prefixes.js",
-    "./tools/stylelint/selector-nested-pattern-scoped/index.js",
+    "./tools/stylelint/no-ampersand-beyond-selector-start/index.js",
     "./tools/stylelint/selector-no-deep/index.js",
-    "./tools/stylelint/no-nested-mixin/index.js"
+    "./tools/stylelint/no-nested-mixin/index.js",
+    "./tools/stylelint/no-concrete-rules/index.js",
+    "./tools/stylelint/no-top-level-ampersand-in-mixin/index.js"
   ],
   "rules": {
-    "material/no-prefixes": [["last 2 versions", "not ie <= 10", "not ie_mob <= 10"]],
+    "material/no-prefixes": [true, {
+      "browsers": ["last 2 versions", "not ie <= 10", "not ie_mob <= 10"],
+      "filePattern": "**/!(*-example.css)"
+    }],
     "material/selector-no-deep": true,
     "material/no-nested-mixin": true,
-    "material/selector-nested-pattern-scoped": [".*[^&]$", {
-      "message": "The & operator is not allowed at the end of theme selectors.",
+    "material/no-ampersand-beyond-selector-start": [true, {
+      "filePattern": "-theme\\.scss$"
+    }],
+    "material/no-concrete-rules": [true, {
+      "filePattern": "^_.*\\.scss$"
+    }],
+    "material/no-top-level-ampersand-in-mixin": [true, {
       "filePattern": "-theme\\.scss$"
     }],
 
@@ -42,8 +52,9 @@
     "shorthand-property-no-redundant-values": true,
 
     "property-case": "lower",
+    "no-duplicate-at-import-rules": true,
 
-    "declaration-block-no-duplicate-properties": [ true, {
+    "declaration-block-no-duplicate-properties": [true, {
       "ignore": ["consecutive-duplicates-with-different-values"]
     }],
     "declaration-block-trailing-semicolon": "always",
@@ -53,8 +64,8 @@
     "declaration-block-semicolon-newline-before": "never-multi-line",
     "declaration-block-semicolon-newline-after": "always-multi-line",
     "declaration-property-value-blacklist": [
-        { "/.*/": ["initial"] },
-        { "message": "The `initial` value is not supported in IE."}
+        {"/.*/": ["initial"]},
+        {"message": "The `initial` value is not supported in IE."}
     ],
 
     "block-closing-brace-newline-after": "always",
@@ -75,6 +86,11 @@
     "selector-type-case": "lower",
     "selector-max-id": 0,
     "no-missing-end-of-source-newline": true,
-    "max-line-length": 100
+    "no-eol-whitespace": true,
+    "max-line-length": 100,
+    "linebreaks": "unix",
+    "selector-class-pattern": ["^_?(mat-|cdk-|example-|demo-|ng-)", {
+      "resolveNestedSelectors": true
+    }]
   }
 }

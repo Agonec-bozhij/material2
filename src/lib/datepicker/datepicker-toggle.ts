@@ -9,20 +9,21 @@
 import {coerceBooleanProperty} from '@angular/cdk/coercion';
 import {
   AfterContentInit,
+  Attribute,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  ContentChild,
+  Directive,
   Input,
   OnChanges,
   OnDestroy,
   SimpleChanges,
   ViewEncapsulation,
-  Directive,
-  ContentChild,
+  ViewChild,
 } from '@angular/core';
-import {merge} from 'rxjs/observable/merge';
-import {of as observableOf} from 'rxjs/observable/of';
-import {Subscription} from 'rxjs/Subscription';
+import {MatButton} from '@angular/material/button';
+import {merge, of as observableOf, Subscription} from 'rxjs';
 import {MatDatepicker} from './datepicker';
 import {MatDatepickerIntl} from './datepicker-intl';
 
@@ -41,11 +42,16 @@ export class MatDatepickerToggleIcon {}
   styleUrls: ['datepicker-toggle.css'],
   host: {
     'class': 'mat-datepicker-toggle',
+    // Always set the tabindex to -1 so that it doesn't overlap with any custom tabindex the
+    // consumer may have provided, while still being able to receive focus.
+    '[attr.tabindex]': '-1',
     '[class.mat-datepicker-toggle-active]': 'datepicker && datepicker.opened',
+    '[class.mat-accent]': 'datepicker && datepicker.color === "accent"',
+    '[class.mat-warn]': 'datepicker && datepicker.color === "warn"',
+    '(focus)': '_button.focus()',
   },
   exportAs: 'matDatepickerToggle',
   encapsulation: ViewEncapsulation.None,
-  preserveWhitespaces: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class MatDatepickerToggle<D> implements AfterContentInit, OnChanges, OnDestroy {
@@ -54,23 +60,43 @@ export class MatDatepickerToggle<D> implements AfterContentInit, OnChanges, OnDe
   /** Datepicker instance that the button will toggle. */
   @Input('for') datepicker: MatDatepicker<D>;
 
+  /** Tabindex for the toggle. */
+  @Input() tabIndex: number | null;
+
   /** Whether the toggle button is disabled. */
   @Input()
   get disabled(): boolean {
-    return this._disabled === undefined ? this.datepicker.disabled : !!this._disabled;
+    if (this._disabled === undefined && this.datepicker) {
+      return this.datepicker.disabled;
+    }
+
+    return !!this._disabled;
   }
   set disabled(value: boolean) {
     this._disabled = coerceBooleanProperty(value);
   }
   private _disabled: boolean;
 
-  /** Custom icon set by the consumer. */
-  @ContentChild(MatDatepickerToggleIcon) _customIcon: MatDatepickerToggleIcon;
+  /** Whether ripples on the toggle should be disabled. */
+  @Input() disableRipple: boolean;
 
-  constructor(public _intl: MatDatepickerIntl, private _changeDetectorRef: ChangeDetectorRef) {}
+  /** Custom icon set by the consumer. */
+  @ContentChild(MatDatepickerToggleIcon, {static: false}) _customIcon: MatDatepickerToggleIcon;
+
+  /** Underlying button element. */
+  @ViewChild('button', {static: false}) _button: MatButton;
+
+  constructor(
+    public _intl: MatDatepickerIntl,
+    private _changeDetectorRef: ChangeDetectorRef,
+    @Attribute('tabindex') defaultTabIndex: string) {
+
+    const parsedTabIndex = Number(defaultTabIndex);
+    this.tabIndex = (parsedTabIndex || parsedTabIndex === 0) ? parsedTabIndex : null;
+  }
 
   ngOnChanges(changes: SimpleChanges) {
-    if (changes.datepicker) {
+    if (changes['datepicker']) {
       this._watchStateChanges();
     }
   }

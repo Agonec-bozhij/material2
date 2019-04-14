@@ -6,17 +6,43 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {Inject, Injectable, Optional} from '@angular/core';
-import {DateAdapter, MAT_DATE_LOCALE} from '@angular/material';
+import {Inject, Injectable, Optional, InjectionToken} from '@angular/core';
+import {DateAdapter, MAT_DATE_LOCALE} from '@angular/material/core';
 // Depending on whether rollup is used, moment needs to be imported differently.
 // Since Moment.js doesn't have a default export, we normally need to import using the `* as`
 // syntax. However, rollup creates a synthetic default module and we thus need to import it using
 // the `default as` syntax.
 // TODO(mmalerba): See if we can clean this up at some point.
 import * as _moment from 'moment';
+// tslint:disable-next-line:no-duplicate-imports
 import {default as _rollupMoment, Moment} from 'moment';
 
 const moment = _rollupMoment || _moment;
+
+/** Configurable options for {@see MomentDateAdapter}. */
+export interface MatMomentDateAdapterOptions {
+  /**
+   * Turns the use of utc dates on or off.
+   * Changing this will change how Angular Material components like DatePicker output dates.
+   * {@default false}
+   */
+  useUtc: boolean;
+}
+
+/** InjectionToken for moment date adapter to configure options. */
+export const MAT_MOMENT_DATE_ADAPTER_OPTIONS = new InjectionToken<MatMomentDateAdapterOptions>(
+  'MAT_MOMENT_DATE_ADAPTER_OPTIONS', {
+    providedIn: 'root',
+    factory: MAT_MOMENT_DATE_ADAPTER_OPTIONS_FACTORY
+});
+
+
+/** @docs-private */
+export function MAT_MOMENT_DATE_ADAPTER_OPTIONS_FACTORY(): MatMomentDateAdapterOptions {
+  return {
+    useUtc: false
+  };
+}
 
 
 /** Creates an array and fills it with values. */
@@ -47,7 +73,10 @@ export class MomentDateAdapter extends DateAdapter<Moment> {
     narrowDaysOfWeek: string[]
   };
 
-  constructor(@Optional() @Inject(MAT_DATE_LOCALE) dateLocale: string) {
+  constructor(@Optional() @Inject(MAT_DATE_LOCALE) dateLocale: string,
+    @Optional() @Inject(MAT_MOMENT_DATE_ADAPTER_OPTIONS)
+    private options?: MatMomentDateAdapterOptions) {
+
     super();
     this.setLocale(dateLocale || moment.locale());
   }
@@ -129,7 +158,7 @@ export class MomentDateAdapter extends DateAdapter<Moment> {
       throw Error(`Invalid date "${date}". Date has to be greater than 0.`);
     }
 
-    let result = moment({year, month, date}).locale(this.locale);
+    const result = this._createMoment({year, month, date}).locale(this.locale);
 
     // If the result isn't valid, the date must have been out of bounds for this month.
     if (!result.isValid()) {
@@ -140,14 +169,14 @@ export class MomentDateAdapter extends DateAdapter<Moment> {
   }
 
   today(): Moment {
-    return moment().locale(this.locale);
+    return this._createMoment().locale(this.locale);
   }
 
   parse(value: any, parseFormat: string | string[]): Moment | null {
     if (value && typeof value == 'string') {
-      return moment(value, parseFormat, this.locale);
+      return this._createMoment(value, parseFormat, this.locale);
     }
-    return value ? moment(value).locale(this.locale) : null;
+    return value ? this._createMoment(value).locale(this.locale) : null;
   }
 
   format(date: Moment, displayFormat: string): string {
@@ -182,16 +211,19 @@ export class MomentDateAdapter extends DateAdapter<Moment> {
   deserialize(value: any): Moment | null {
     let date;
     if (value instanceof Date) {
-      date = moment(value);
+      date = this._createMoment(value).locale(this.locale);
+    } else if (this.isDateInstance(value)) {
+      // Note: assumes that cloning also sets the correct locale.
+      return this.clone(value);
     }
     if (typeof value === 'string') {
       if (!value) {
         return null;
       }
-      date = moment(value, moment.ISO_8601).locale(this.locale);
+      date = this._createMoment(value, moment.ISO_8601).locale(this.locale);
     }
     if (date && this.isValid(date)) {
-      return date;
+      return this._createMoment(date).locale(this.locale);
     }
     return super.deserialize(value);
   }
@@ -206,5 +238,10 @@ export class MomentDateAdapter extends DateAdapter<Moment> {
 
   invalid(): Moment {
     return moment.invalid();
+  }
+
+  /** Creates a Moment instance while respecting the current UTC settings. */
+  private _createMoment(...args: any[]): Moment {
+    return (this.options && this.options.useUtc) ? moment.utc(...args) : moment(...args);
   }
 }

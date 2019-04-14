@@ -7,11 +7,11 @@
  */
 
 /** Creates a browser MouseEvent with the specified options. */
-export function createMouseEvent(type: string, x = 0, y = 0) {
+export function createMouseEvent(type: string, x = 0, y = 0, button = 0) {
   const event = document.createEvent('MouseEvent');
 
   event.initMouseEvent(type,
-    false, /* canBubble */
+    true, /* canBubble */
     false, /* cancelable */
     window, /* view */
     0, /* detail */
@@ -23,8 +23,12 @@ export function createMouseEvent(type: string, x = 0, y = 0) {
     false, /* altKey */
     false, /* shiftKey */
     false, /* metaKey */
-    0, /* button */
+    button, /* button */
     null /* relatedTarget */);
+
+  // `initMouseEvent` doesn't allow us to pass the `buttons` and
+  // defaults it to 0 which looks like a fake event.
+  Object.defineProperty(event, 'buttons', {get: () => 1});
 
   return event;
 }
@@ -41,7 +45,9 @@ export function createTouchEvent(type: string, pageX = 0, pageY = 0) {
   // Most of the browsers don't have a "initTouchEvent" method that can be used to define
   // the touch details.
   Object.defineProperties(event, {
-    touches: {value: [touchDetails]}
+    touches: {value: [touchDetails]},
+    targetTouches: {value: [touchDetails]},
+    changedTouches: {value: [touchDetails]}
   });
 
   return event;
@@ -50,11 +56,14 @@ export function createTouchEvent(type: string, pageX = 0, pageY = 0) {
 /** Dispatches a keydown event from an element. */
 export function createKeyboardEvent(type: string, keyCode: number, target?: Element, key?: string) {
   let event = document.createEvent('KeyboardEvent') as any;
-  // Firefox does not support `initKeyboardEvent`, but supports `initKeyEvent`.
-  let initEventFn = (event.initKeyEvent || event.initKeyboardEvent).bind(event);
   let originalPreventDefault = event.preventDefault;
 
-  initEventFn(type, true, true, window, 0, 0, 0, 0, 0, keyCode);
+  // Firefox does not support `initKeyboardEvent`, but supports `initKeyEvent`.
+  if (event.initKeyEvent) {
+    event.initKeyEvent(type, true, true, window, 0, 0, 0, 0, 0, keyCode);
+  } else {
+    event.initKeyboardEvent(type, true, true, window, 0, key, 0, '', false);
+  }
 
   // Webkit Browsers don't set the keyCode when calling the init function.
   // See related bug https://bugs.webkit.org/show_bug.cgi?id=16735
@@ -74,7 +83,7 @@ export function createKeyboardEvent(type: string, keyCode: number, target?: Elem
 }
 
 /** Creates a fake event object with any desired event type. */
-export function createFakeEvent(type: string, canBubble = true, cancelable = true) {
+export function createFakeEvent(type: string, canBubble = false, cancelable = true) {
   const event = document.createEvent('Event');
   event.initEvent(type, canBubble, cancelable);
   return event;

@@ -6,23 +6,25 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {Injectable, Optional, SkipSelf, NgZone, OnDestroy} from '@angular/core';
 import {Platform} from '@angular/cdk/platform';
-import {Observable} from 'rxjs/Observable';
-import {fromEvent} from 'rxjs/observable/fromEvent';
-import {merge} from 'rxjs/observable/merge';
-import {auditTime} from 'rxjs/operators/auditTime';
-import {Subscription} from 'rxjs/Subscription';
-import {of as observableOf} from 'rxjs/observable/of';
+import {Injectable, NgZone, OnDestroy, Optional, SkipSelf} from '@angular/core';
+import {merge, of as observableOf, fromEvent, Observable, Subscription} from 'rxjs';
+import {auditTime} from 'rxjs/operators';
 
 /** Time in ms to throttle the resize events by default. */
 export const DEFAULT_RESIZE_TIME = 20;
+
+/** Object that holds the scroll position of the viewport in each direction. */
+export interface ViewportScrollPosition {
+  top: number;
+  left: number;
+}
 
 /**
  * Simple utility for getting the bounds of the browser viewport.
  * @docs-private
  */
-@Injectable()
+@Injectable({providedIn: 'root'})
 export class ViewportRuler implements OnDestroy {
   /** Cached viewport dimensions. */
   private _viewportSize: {width: number; height: number};
@@ -33,12 +35,16 @@ export class ViewportRuler implements OnDestroy {
   /** Subscription to streams that invalidate the cached viewport dimensions. */
   private _invalidateCache: Subscription;
 
-  constructor(platform: Platform, ngZone: NgZone) {
-    this._change = platform.isBrowser ? ngZone.runOutsideAngular(() => {
-      return merge<Event>(fromEvent(window, 'resize'), fromEvent(window, 'orientationchange'));
-    }) : observableOf();
+  constructor(private _platform: Platform, ngZone: NgZone) {
+    ngZone.runOutsideAngular(() => {
+      this._change = _platform.isBrowser ?
+          merge(fromEvent(window, 'resize'), fromEvent(window, 'orientationchange')) :
+          observableOf();
 
-    this._invalidateCache = this.change().subscribe(() => this._updateViewportSize());
+      // Note that we need to do the subscription inside `runOutsideAngular`
+      // since subscribing is what causes the event listener to be added.
+      this._invalidateCache = this.change().subscribe(() => this._updateViewportSize());
+    });
   }
 
   ngOnDestroy() {
@@ -51,7 +57,14 @@ export class ViewportRuler implements OnDestroy {
       this._updateViewportSize();
     }
 
-    return {width: this._viewportSize.width, height: this._viewportSize.height};
+    const output = {width: this._viewportSize.width, height: this._viewportSize.height};
+
+    // If we're not on a browser, don't cache the size since it'll be mocked out anyway.
+    if (!this._platform.isBrowser) {
+      this._viewportSize = null!;
+    }
+
+    return output;
   }
 
   /** Gets a ClientRect for the viewport's bounds. */
@@ -79,27 +92,34 @@ export class ViewportRuler implements OnDestroy {
   }
 
   /** Gets the (top, left) scroll position of the viewport. */
-  getViewportScrollPosition() {
+  getViewportScrollPosition(): ViewportScrollPosition {
+    // While we can get a reference to the fake document
+    // during SSR, it doesn't have getBoundingClientRect.
+    if (!this._platform.isBrowser) {
+      return {top: 0, left: 0};
+    }
+
     // The top-left-corner of the viewport is determined by the scroll position of the document
     // body, normally just (scrollLeft, scrollTop). However, Chrome and Firefox disagree about
     // whether `document.body` or `document.documentElement` is the scrolled element, so reading
     // `scrollTop` and `scrollLeft` is inconsistent. However, using the bounding rect of
     // `document.documentElement` works consistently, where the `top` and `left` values will
     // equal negative the scroll position.
-    const documentRect = document.documentElement.getBoundingClientRect();
+    const documentElement = document.documentElement!;
+    const documentRect = documentElement.getBoundingClientRect();
 
     const top = -documentRect.top || document.body.scrollTop || window.scrollY ||
-                 document.documentElement.scrollTop || 0;
+                 documentElement.scrollTop || 0;
 
     const left = -documentRect.left || document.body.scrollLeft || window.scrollX ||
-                  document.documentElement.scrollLeft || 0;
+                  documentElement.scrollLeft || 0;
 
     return {top, left};
   }
 
   /**
    * Returns a stream that emits whenever the size of the viewport changes.
-   * @param throttle Time in milliseconds to throttle the stream.
+   * @param throttleTime Time in milliseconds to throttle the stream.
    */
   change(throttleTime: number = DEFAULT_RESIZE_TIME): Observable<Event> {
     return throttleTime > 0 ? this._change.pipe(auditTime(throttleTime)) : this._change;
@@ -107,18 +127,21 @@ export class ViewportRuler implements OnDestroy {
 
   /** Updates the cached viewport size. */
   private _updateViewportSize() {
-    this._viewportSize = {width: window.innerWidth, height: window.innerHeight};
+    this._viewportSize = this._platform.isBrowser ?
+        {width: window.innerWidth, height: window.innerHeight} :
+        {width: 0, height: 0};
   }
 }
 
-/** @docs-private */
+
+/** @docs-private @deprecated @breaking-change 8.0.0 */
 export function VIEWPORT_RULER_PROVIDER_FACTORY(parentRuler: ViewportRuler,
                                                 platform: Platform,
                                                 ngZone: NgZone) {
   return parentRuler || new ViewportRuler(platform, ngZone);
 }
 
-/** @docs-private */
+/** @docs-private @deprecated @breaking-change 8.0.0 */
 export const VIEWPORT_RULER_PROVIDER = {
   // If there is already a ViewportRuler available, use that. Otherwise, provide a new one.
   provide: ViewportRuler,

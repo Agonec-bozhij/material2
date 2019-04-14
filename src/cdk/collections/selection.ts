@@ -6,14 +6,14 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {Subject} from 'rxjs/Subject';
+import {Subject} from 'rxjs';
 
 /**
  * Class to be used to power selecting one or more options from a list.
  */
 export class SelectionModel<T> {
   /** Currently-selected values. */
-  private _selection: Set<T> = new Set();
+  private _selection = new Set<T>();
 
   /** Keeps track of the deselected options that haven't been emitted by the change event. */
   private _deselectedToEmit: T[] = [];
@@ -34,7 +34,14 @@ export class SelectionModel<T> {
   }
 
   /** Event emitted when the value has changed. */
-  onChange: Subject<SelectionChange<T>> | null = this._emitChanges ? new Subject() : null;
+  changed: Subject<SelectionChange<T>> = new Subject();
+
+  /**
+   * Event emitted when the value has changed.
+   * @deprecated Use `changed` instead.
+   * @breaking-change 8.0.0 To be changed to `changed`
+   */
+  onChange: Subject<SelectionChange<T>> = this.changed;
 
   constructor(
     private _multiple = false,
@@ -111,9 +118,16 @@ export class SelectionModel<T> {
    * Sorts the selected values based on a predicate function.
    */
   sort(predicate?: (a: T, b: T) => number): void {
-    if (this._multiple && this._selected) {
-      this._selected.sort(predicate);
+    if (this._multiple && this.selected) {
+      this._selected!.sort(predicate);
     }
+  }
+
+  /**
+   * Gets whether multiple values can be selected.
+   */
+  isMultipleSelection() {
+    return this._multiple;
   }
 
   /** Emits a change event and clears the records of selected and deselected values. */
@@ -122,11 +136,11 @@ export class SelectionModel<T> {
     this._selected = null;
 
     if (this._selectedToEmit.length || this._deselectedToEmit.length) {
-      const eventData = new SelectionChange<T>(this, this._selectedToEmit, this._deselectedToEmit);
-
-      if (this.onChange) {
-        this.onChange.next(eventData);
-      }
+      this.changed.next({
+        source: this,
+        added: this._selectedToEmit,
+        removed: this._deselectedToEmit
+      });
 
       this._deselectedToEmit = [];
       this._selectedToEmit = [];
@@ -181,19 +195,19 @@ export class SelectionModel<T> {
  * Event emitted when the value of a MatSelectionModel has changed.
  * @docs-private
  */
-export class SelectionChange<T> {
-  constructor(
-    /** Model that dispatched the event. */
-    public source: SelectionModel<T>,
-    /** Options that were added to the model. */
-    public added?: T[],
-    /** Options that were removed from the model. */
-    public removed?: T[]) {}
+export interface SelectionChange<T> {
+  /** Model that dispatched the event. */
+  source: SelectionModel<T>;
+  /** Options that were added to the model. */
+  added: T[];
+  /** Options that were removed from the model. */
+  removed: T[];
 }
 
 /**
  * Returns an error that reports that multiple values are passed into a selection model
  * with a single value.
+ * @docs-private
  */
 export function getMultipleValuesInSingleSelectionError() {
   return Error('Cannot pass multiple values into SelectionModel with single-value mode.');

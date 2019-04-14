@@ -18,6 +18,7 @@ import {
 } from '@angular/core';
 import {TemplatePortal, DomPortalOutlet} from '@angular/cdk/portal';
 import {DOCUMENT} from '@angular/common';
+import {Subject} from 'rxjs';
 
 /**
  * Menu content that will be rendered lazily once the menu is opened.
@@ -28,6 +29,9 @@ import {DOCUMENT} from '@angular/common';
 export class MatMenuContent implements OnDestroy {
   private _portal: TemplatePortal<any>;
   private _outlet: DomPortalOutlet;
+
+  /** Emits when the menu content has been attached. */
+  _attached = new Subject<void>();
 
   constructor(
     private _template: TemplateRef<any>,
@@ -44,9 +48,9 @@ export class MatMenuContent implements OnDestroy {
   attach(context: any = {}) {
     if (!this._portal) {
       this._portal = new TemplatePortal(this._template, this._viewContainerRef);
-    } else if (this._portal.isAttached) {
-      this._portal.detach();
     }
+
+    this.detach();
 
     if (!this._outlet) {
       this._outlet = new DomPortalOutlet(this._document.createElement('div'),
@@ -60,6 +64,17 @@ export class MatMenuContent implements OnDestroy {
     // risk it staying attached to a pane that's no longer in the DOM.
     element.parentNode!.insertBefore(this._outlet.outletElement, element);
     this._portal.attach(this._outlet, context);
+    this._attached.next();
+  }
+
+  /**
+   * Detaches the content.
+   * @docs-private
+   */
+  detach() {
+    if (this._portal.isAttached) {
+      this._portal.detach();
+    }
   }
 
   ngOnDestroy() {

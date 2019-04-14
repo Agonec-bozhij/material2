@@ -6,16 +6,26 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {DataSource} from '@angular/cdk/table';
-import {BehaviorSubject} from 'rxjs/BehaviorSubject';
-import {MatPaginator} from '@angular/material/paginator';
-import {MatSort} from '@angular/material/sort';
-import {Subscription} from 'rxjs/Subscription';
-import {combineLatest} from 'rxjs/operators/combineLatest';
-import {map} from 'rxjs/operators/map';
-import {startWith} from 'rxjs/operators/startWith';
-import {empty} from 'rxjs/observable/empty';
 import {_isNumberValue} from '@angular/cdk/coercion';
+import {DataSource} from '@angular/cdk/table';
+import {
+  BehaviorSubject,
+  combineLatest,
+  merge,
+  Observable,
+  of as observableOf,
+  Subscription,
+  Subject,
+} from 'rxjs';
+import {MatPaginator, PageEvent} from '@angular/material/paginator';
+import {MatSort, Sort} from '@angular/material/sort';
+import {map} from 'rxjs/operators';
+
+/**
+ * Corresponds to `Number.MAX_SAFE_INTEGER`. Moved out into a variable here due to
+ * flaky browser support and the value not being defined in Closure's typings.
+ */
+const MAX_SAFE_INTEGER = 9007199254740991;
 
 /**
  * Data source that accepts a client-side data array and includes native support of filtering,
@@ -35,11 +45,14 @@ export class MatTableDataSource<T> extends DataSource<T> {
   /** Stream that emits when a new filter string is set on the data source. */
   private readonly _filter = new BehaviorSubject<string>('');
 
+  /** Used to react to internal changes of the paginator that are made by the data source itself. */
+  private readonly _internalPageChanges = new Subject<void>();
+
   /**
    * Subscription to the changes that should trigger an update to the table's rendered rows, such
    * as filtering, sorting, pagination, or base data changes.
    */
-  _renderChangesSubscription: Subscription;
+  _renderChangesSubscription = Subscription.EMPTY;
 
   /**
    * The filtered set of data that has been matched by the filter string, or all the data if there
@@ -99,8 +112,17 @@ export class MatTableDataSource<T> extends DataSource<T> {
    */
   sortingDataAccessor: ((data: T, sortHeaderId: string) => string|number) =
       (data: T, sortHeaderId: string): string|number => {
-    const value: any = data[sortHeaderId];
-    return _isNumberValue(value) ? Number(value) : value;
+    const value = (data as {[key: string]: any})[sortHeaderId];
+
+    if (_isNumberValue(value)) {
+      const numberValue = Number(value);
+
+      // Numbers beyond `MAX_SAFE_INTEGER` can't be compared reliably so we
+      // leave them as strings. For more info: https://goo.gl/y5vbSg
+      return numberValue < MAX_SAFE_INTEGER ? numberValue : value;
+    }
+
+    return value;
   }
 
   /**
@@ -126,16 +148,16 @@ export class MatTableDataSource<T> extends DataSource<T> {
       // This avoids inconsistent results when comparing values to undefined/null.
       // If neither value exists, return 0 (equal).
       let comparatorResult = 0;
-      if (valueA && valueB) {
+      if (valueA != null && valueB != null) {
         // Check if one value is greater than the other; if equal, comparatorResult should remain 0.
         if (valueA > valueB) {
           comparatorResult = 1;
         } else if (valueA < valueB) {
           comparatorResult = -1;
         }
-      } else if (valueA) {
+      } else if (valueA != null) {
         comparatorResult = 1;
-      } else if (valueB) {
+      } else if (valueB != null) {
         comparatorResult = -1;
       }
 
@@ -155,8 +177,15 @@ export class MatTableDataSource<T> extends DataSource<T> {
    */
   filterPredicate: ((data: T, filter: string) => boolean) = (data: T, filter: string): boolean => {
     // Transform the data into a lowercase string of all property values.
-    const accumulator = (currentTerm, key) => currentTerm + data[key];
-    const dataStr = Object.keys(data).reduce(accumulator, '').toLowerCase();
+    const dataStr = Object.keys(data).reduce((currentTerm: string, key: string) => {
+      // Use an obscure Unicode character to delimit the words in the concatenated string.
+      // This avoids matches where the values of two columns combined will match the user's query
+      // (e.g. `Flute` and `Stop` will match `Test`). The character is intended to be something
+      // that has a very low chance of being typed in by somebody in a text field. This one in
+      // particular is "White up-pointing triangle with dot" from
+      // https://en.wikipedia.org/wiki/List_of_Unicode_characters
+      return currentTerm + (data as {[key: string]: any})[key] + '◬';
+    }, '').toLowerCase();
 
     // Transform the filter by converting it to lowercase and removing whitespace.
     const transformedFilter = filter.trim().toLowerCase();
@@ -177,27 +206,34 @@ export class MatTableDataSource<T> extends DataSource<T> {
    */
   _updateChangeSubscription() {
     // Sorting and/or pagination should be watched if MatSort and/or MatPaginator are provided.
-    // Otherwise, use an empty observable stream to take their place.
-    const sortChange = this._sort ? this._sort.sortChange : empty();
-    const pageChange = this._paginator ? this._paginator.page : empty();
-
-    if (this._renderChangesSubscription) {
-      this._renderChangesSubscription.unsubscribe();
-    }
-
+    // The events should emit whenever the component emits a change or initializes, or if no
+    // component is provided, a stream with just a null event should be provided.
+    // The `sortChange` and `pageChange` acts as a signal to the combineLatests below so that the
+    // pipeline can progress to the next step. Note that the value from these streams are not used,
+    // they purely act as a signal to progress in the pipeline.
+    const sortChange: Observable<Sort|null|void> = this._sort ?
+        merge(this._sort.sortChange, this._sort.initialized) as Observable<Sort|void> :
+        observableOf(null);
+    const pageChange: Observable<PageEvent|null|void> = this._paginator ?
+        merge(
+          this._paginator.page,
+          this._internalPageChanges,
+          this._paginator.initialized
+        ) as Observable<PageEvent|void> :
+        observableOf(null);
+    const dataStream = this._data;
     // Watch for base data or filter changes to provide a filtered set of data.
-    this._renderChangesSubscription = this._data.pipe(
-      combineLatest(this._filter),
-      map(([data]) => this._filterData(data)),
-      // Watch for filtered data or sort changes to provide an ordered set of data.
-      combineLatest(sortChange.pipe(startWith(null!))),
-      map(([data]) => this._orderData(data)),
-      // Watch for ordered data or page changes to provide a paged set of data.
-      combineLatest(pageChange.pipe(startWith(null!))),
-      map(([data]) => this._pageData(data))
-    )
+    const filteredData = combineLatest(dataStream, this._filter)
+      .pipe(map(([data]) => this._filterData(data)));
+    // Watch for filtered data or sort changes to provide an ordered set of data.
+    const orderedData = combineLatest(filteredData, sortChange)
+      .pipe(map(([data]) => this._orderData(data)));
+    // Watch for ordered data or page changes to provide a paged set of data.
+    const paginatedData = combineLatest(orderedData, pageChange)
+      .pipe(map(([data]) => this._pageData(data)));
     // Watched for paged data changes and send the result to the table to render.
-    .subscribe(data => this._renderData.next(data));
+    this._renderChangesSubscription.unsubscribe();
+    this._renderChangesSubscription = paginatedData.subscribe(data => this._renderData.next(data));
   }
 
   /**
@@ -247,14 +283,24 @@ export class MatTableDataSource<T> extends DataSource<T> {
    */
   _updatePaginator(filteredDataLength: number) {
     Promise.resolve().then(() => {
-      if (!this.paginator) { return; }
+      const paginator = this.paginator;
 
-      this.paginator.length = filteredDataLength;
+      if (!paginator) { return; }
+
+      paginator.length = filteredDataLength;
 
       // If the page index is set beyond the page, reduce it to the last page.
-      if (this.paginator.pageIndex > 0) {
-        const lastPageIndex = Math.ceil(this.paginator.length / this.paginator.pageSize) - 1 || 0;
-        this.paginator.pageIndex = Math.min(this.paginator.pageIndex, lastPageIndex);
+      if (paginator.pageIndex > 0) {
+        const lastPageIndex = Math.ceil(paginator.length / paginator.pageSize) - 1 || 0;
+        const newPageIndex = Math.min(paginator.pageIndex, lastPageIndex);
+
+        if (newPageIndex !== paginator.pageIndex) {
+          paginator.pageIndex = newPageIndex;
+
+          // Since the paginator only emits after user-generated changes,
+          // we need our own stream so we know to should re-render the data.
+          this._internalPageChanges.next();
+        }
       }
     });
   }

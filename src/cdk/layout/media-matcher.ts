@@ -8,13 +8,14 @@
 import {Injectable} from '@angular/core';
 import {Platform} from '@angular/cdk/platform';
 
-/**
- * Global registry for all dynamically-created, injected style tags.
- */
-const styleElementForWebkitCompatibility: Map<string, HTMLStyleElement> = new Map();
+/** Global registry for all dynamically-created, injected media queries. */
+const mediaQueriesForWebkitCompatibility: Set<string> = new Set<string>();
+
+/** Style tag that holds all of the dynamically-created media queries. */
+let mediaQueryStyleNode: HTMLStyleElement | undefined;
 
 /** A utility for calling matchMedia queries. */
-@Injectable()
+@Injectable({providedIn: 'root'})
 export class MediaMatcher {
   /** The internal matchMedia method to return back a MediaQueryList like object. */
   private _matchMedia: (query: string) => MediaQueryList;
@@ -42,36 +43,39 @@ export class MediaMatcher {
 }
 
 /**
- * For Webkit engines that only trigger the MediaQueryListListener when there is at least one CSS
- * selector for the respective media query.
+ * For Webkit engines that only trigger the MediaQueryListListener when
+ * there is at least one CSS selector for the respective media query.
  */
 function createEmptyStyleRule(query: string) {
-  if (!styleElementForWebkitCompatibility.has(query)) {
-    try {
-      const style = document.createElement('style');
+  if (mediaQueriesForWebkitCompatibility.has(query)) {
+    return;
+  }
 
-      style.setAttribute('type', 'text/css');
-      if (!style.sheet) {
-        const cssText = `@media ${query} {.fx-query-test{ }}`;
-        style.appendChild(document.createTextNode(cssText));
-      }
-
-      document.getElementsByTagName('head')[0].appendChild(style);
-
-      // Store in private global registry
-      styleElementForWebkitCompatibility.set(query, style);
-    } catch (e) {
-      console.error(e);
+  try {
+    if (!mediaQueryStyleNode) {
+      mediaQueryStyleNode = document.createElement('style');
+      mediaQueryStyleNode.setAttribute('type', 'text/css');
+      document.head!.appendChild(mediaQueryStyleNode);
     }
+
+    if (mediaQueryStyleNode.sheet) {
+      (mediaQueryStyleNode.sheet as CSSStyleSheet)
+          .insertRule(`@media ${query} {.fx-query-test{ }}`, 0);
+      mediaQueriesForWebkitCompatibility.add(query);
+    }
+  } catch (e) {
+    console.error(e);
   }
 }
 
 /** No-op matchMedia replacement for non-browser platforms. */
 function noopMatchMedia(query: string): MediaQueryList {
+  // Use `as any` here to avoid adding additional necessary properties for
+  // the noop matcher.
   return {
     matches: query === 'all' || query === '',
     media: query,
     addListener: () => {},
     removeListener: () => {}
-  };
+  } as any;
 }

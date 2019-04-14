@@ -1,8 +1,7 @@
-import {Component} from '@angular/core';
+import {Component, OnInit} from '@angular/core';
 import {FormControl} from '@angular/forms';
-import {Observable} from 'rxjs/Observable';
-import {startWith} from 'rxjs/operators/startWith';
-import {map} from 'rxjs/operators/map';
+import {Observable} from 'rxjs';
+import {map, startWith} from 'rxjs/operators';
 
 /**
  * @title Highlight the first autocomplete option
@@ -10,22 +9,23 @@ import {map} from 'rxjs/operators/map';
 @Component({
   selector: 'autocomplete-auto-active-first-option-example',
   templateUrl: 'autocomplete-auto-active-first-option-example.html',
-  styleUrls: ['autocomplete-auto-active-first-option-example.css']
+  styleUrls: ['autocomplete-auto-active-first-option-example.css'],
 })
-export class AutocompleteAutoActiveFirstOptionExample {
-  myControl: FormControl = new FormControl();
-  options = ['One', 'Two', 'Three'];
+export class AutocompleteAutoActiveFirstOptionExample implements OnInit {
+  myControl = new FormControl();
+  options: string[] = ['One', 'Two', 'Three'];
   filteredOptions: Observable<string[]>;
 
   ngOnInit() {
     this.filteredOptions = this.myControl.valueChanges.pipe(
       startWith(''),
-      map(val => this.filter(val))
+      map(value => this._filter(value))
     );
   }
 
-  filter(val: string): string[] {
-    return this.options.filter(option => option.toLowerCase().indexOf(val.toLowerCase()) === 0);
-  }
+  private _filter(value: string): string[] {
+    const filterValue = value.toLowerCase();
 
+    return this.options.filter(option => option.toLowerCase().indexOf(filterValue) === 0);
+  }
 }

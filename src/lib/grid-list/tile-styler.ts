@@ -11,6 +11,12 @@ import {MatGridTile} from './grid-tile';
 import {TileCoordinator} from './tile-coordinator';
 
 /**
+ * RegExp that can be used to check whether a value will
+ * be allowed inside a CSS `calc()` expression.
+ */
+const cssCalcAllowedValue = /^-?\d+((\.\d+)?[A-Za-z%$]?)+$/;
+
+/**
  * Sets the style properties for an individual tile, given the position calculated by the
  * Tile Coordinator.
  * @docs-private
@@ -106,7 +112,7 @@ export abstract class TileStyler {
 
     // The width and horizontal position of each tile is always calculated the same way, but the
     // height and vertical position depends on the rowMode.
-    let side = this._direction === 'ltr' ? 'left' : 'right';
+    let side = this._direction === 'rtl' ? 'right' : 'left';
     tile._setStyle(side, this.getTilePosition(baseTileWidth, colIndex));
     tile._setStyle('width', calc(this.getTileSize(baseTileWidth, tile.colspan)));
   }
@@ -132,7 +138,7 @@ export abstract class TileStyler {
    * @docs-private
    */
   abstract setRowStyles(tile: MatGridTile, rowIndex: number, percentWidth: number,
-                        gutterWidth: number);
+                        gutterWidth: number): void;
 
   /**
    * Calculates the computed height and returns the correct style property to set.
@@ -146,7 +152,7 @@ export abstract class TileStyler {
    * @param list Grid list that the styler was attached to.
    * @docs-private
    */
-  abstract reset(list: MatGridList);
+  abstract reset(list: MatGridList): void;
 }
 
 
@@ -162,6 +168,10 @@ export class FixedTileStyler extends TileStyler {
   init(gutterSize: string, tracker: TileCoordinator, cols: number, direction: string) {
     super.init(gutterSize, tracker, cols, direction);
     this.fixedRowHeight = normalizeUnits(this.fixedRowHeight);
+
+    if (!cssCalcAllowedValue.test(this.fixedRowHeight)) {
+      throw Error(`Invalid value "${this.fixedRowHeight}" set as rowHeight.`);
+    }
   }
 
   setRowStyles(tile: MatGridTile, rowIndex: number): void {
@@ -178,10 +188,12 @@ export class FixedTileStyler extends TileStyler {
   reset(list: MatGridList) {
     list._setListStyle(['height', null]);
 
-    list._tiles.forEach(tile => {
-      tile._setStyle('top', null);
-      tile._setStyle('height', null);
-    });
+    if (list._tiles) {
+      list._tiles.forEach(tile => {
+        tile._setStyle('top', null);
+        tile._setStyle('height', null);
+      });
+    }
   }
 }
 
@@ -210,22 +222,22 @@ export class RatioTileStyler extends TileStyler {
     // Use padding-top and margin-top to maintain the given aspect ratio, as
     // a percentage-based value for these properties is applied versus the *width* of the
     // containing block. See http://www.w3.org/TR/CSS2/box.html#margin-properties
-    tile._setStyle('margin-top', this.getTilePosition(this.baseTileHeight, rowIndex));
-    tile._setStyle('padding-top', calc(this.getTileSize(this.baseTileHeight, tile.rowspan)));
+    tile._setStyle('marginTop', this.getTilePosition(this.baseTileHeight, rowIndex));
+    tile._setStyle('paddingTop', calc(this.getTileSize(this.baseTileHeight, tile.rowspan)));
   }
 
   getComputedHeight(): [string, string] {
     return [
-      'padding-bottom', calc(`${this.getTileSpan(this.baseTileHeight)} + ${this.getGutterSpan()}`)
+      'paddingBottom', calc(`${this.getTileSpan(this.baseTileHeight)} + ${this.getGutterSpan()}`)
     ];
   }
 
   reset(list: MatGridList) {
-    list._setListStyle(['padding-bottom', null]);
+    list._setListStyle(['paddingBottom', null]);
 
     list._tiles.forEach(tile => {
-      tile._setStyle('margin-top', null);
-      tile._setStyle('padding-top', null);
+      tile._setStyle('marginTop', null);
+      tile._setStyle('paddingTop', null);
     });
   }
 
@@ -248,7 +260,6 @@ export class RatioTileStyler extends TileStyler {
  * @docs-private
  */
 export class FitTileStyler extends TileStyler {
-
   setRowStyles(tile: MatGridTile, rowIndex: number): void {
     // Percent of the available vertical space that one row takes up.
     let percentHeightPerTile = 100 / this._rowspan;
@@ -264,20 +275,24 @@ export class FitTileStyler extends TileStyler {
   }
 
   reset(list: MatGridList) {
-    list._tiles.forEach(tile => {
-      tile._setStyle('top', null);
-      tile._setStyle('height', null);
-    });
+    if (list._tiles) {
+      list._tiles.forEach(tile => {
+        tile._setStyle('top', null);
+        tile._setStyle('height', null);
+      });
+    }
   }
 }
 
 
 /** Wraps a CSS string in a calc function */
-function calc(exp: string): string { return `calc(${exp})`; }
+function calc(exp: string): string {
+  return `calc(${exp})`;
+}
 
 
 /** Appends pixels to a CSS string if no units are given. */
 function normalizeUnits(value: string): string {
-  return (value.match(/px|em|rem/)) ? value : value + 'px';
+  return value.match(/([A-Za-z%]+)$/) ? value : `${value}px`;
 }
 

@@ -8,21 +8,29 @@
 
 import {coerceBooleanProperty} from '@angular/cdk/coercion';
 import {getSupportedInputTypes, Platform} from '@angular/cdk/platform';
+import {AutofillMonitor} from '@angular/cdk/text-field';
 import {
   Directive,
   DoCheck,
   ElementRef,
   Inject,
   Input,
+  NgZone,
   OnChanges,
   OnDestroy,
+  OnInit,
   Optional,
   Self,
 } from '@angular/core';
 import {FormGroupDirective, NgControl, NgForm} from '@angular/forms';
-import {ErrorStateMatcher, mixinErrorState, CanUpdateErrorState} from '@angular/material/core';
+import {
+  CanUpdateErrorState,
+  CanUpdateErrorStateCtor,
+  ErrorStateMatcher,
+  mixinErrorState,
+} from '@angular/material/core';
 import {MatFormFieldControl} from '@angular/material/form-field';
-import {Subject} from 'rxjs/Subject';
+import {Subject} from 'rxjs';
 import {getMatInputUnsupportedTypeError} from './input-errors';
 import {MAT_INPUT_VALUE_ACCESSOR} from './input-value-accessor';
 
@@ -51,22 +59,27 @@ export class MatInputBase {
               /** @docs-private */
               public ngControl: NgControl) {}
 }
-export const _MatInputMixinBase = mixinErrorState(MatInputBase);
+export const _MatInputMixinBase: CanUpdateErrorStateCtor & typeof MatInputBase =
+    mixinErrorState(MatInputBase);
 
 /** Directive that allows a native input to work inside a `MatFormField`. */
 @Directive({
-  selector: `input[matInput], textarea[matInput]`,
+  selector: `input[matInput], textarea[matInput], select[matNativeControl],
+      input[matNativeControl], textarea[matNativeControl]`,
   exportAs: 'matInput',
   host: {
+    /**
+     * @breaking-change 8.0.0 remove .mat-form-field-autofill-control in favor of AutofillMonitor.
+     */
     'class': 'mat-input-element mat-form-field-autofill-control',
     '[class.mat-input-server]': '_isServer',
     // Native input properties that are overwritten by Angular inputs need to be synced with
     // the native input element. Otherwise property bindings for those don't work.
     '[attr.id]': 'id',
-    '[placeholder]': 'placeholder',
+    '[attr.placeholder]': 'placeholder',
     '[disabled]': 'disabled',
     '[required]': 'required',
-    '[readonly]': 'readonly',
+    '[attr.readonly]': 'readonly && !_isNativeSelect || null',
     '[attr.aria-describedby]': '_ariaDescribedby || null',
     '[attr.aria-invalid]': 'errorState',
     '[attr.aria-required]': 'required.toString()',
@@ -77,7 +90,7 @@ export const _MatInputMixinBase = mixinErrorState(MatInputBase);
   providers: [{provide: MatFormFieldControl, useExisting: MatInput}],
 })
 export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<any>, OnChanges,
-    OnDestroy, DoCheck, CanUpdateErrorState {
+    OnDestroy, OnInit, DoCheck, CanUpdateErrorState {
   protected _uid = `mat-input-${nextUniqueId++}`;
   protected _previousNativeValue: any;
   private _inputValueAccessor: {value: any};
@@ -86,6 +99,9 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
 
   /** Whether the component is being rendered on the server. */
   _isServer = false;
+
+  /** Whether the component is a native html select. */
+  _isNativeSelect = false;
 
   /**
    * Implemented as part of MatFormFieldControl.
@@ -104,6 +120,12 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
    * @docs-private
    */
   controlType: string = 'mat-input';
+
+  /**
+   * Implemented as part of MatFormFieldControl.
+   * @docs-private
+   */
+  autofilled = false;
 
   /**
    * Implemented as part of MatFormFieldControl.
@@ -141,7 +163,7 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
    * Implemented as part of MatFormFieldControl.
    * @docs-private
    */
-  @Input() placeholder: string = '';
+  @Input() placeholder: string;
 
   /**
    * Implemented as part of MatFormFieldControl.
@@ -163,7 +185,7 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
     // input element. To ensure that bindings for `type` work, we need to sync the setter
     // with the native property. Textarea elements don't support the type property or attribute.
     if (!this._isTextarea() && getSupportedInputTypes().has(this._type)) {
-      this._elementRef.nativeElement.type = this._type;
+      (this._elementRef.nativeElement as HTMLInputElement).type = this._type;
     }
   }
   protected _type = 'text';
@@ -199,18 +221,25 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
     'week'
   ].filter(t => getSupportedInputTypes().has(t));
 
-  constructor(protected _elementRef: ElementRef,
-              protected _platform: Platform,
-              /** @docs-private */
-              @Optional() @Self() public ngControl: NgControl,
-              @Optional() _parentForm: NgForm,
-              @Optional() _parentFormGroup: FormGroupDirective,
-              _defaultErrorStateMatcher: ErrorStateMatcher,
-              @Optional() @Self() @Inject(MAT_INPUT_VALUE_ACCESSOR) inputValueAccessor: any) {
+  constructor(
+    protected _elementRef: ElementRef<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
+    protected _platform: Platform,
+    /** @docs-private */
+    @Optional() @Self() public ngControl: NgControl,
+    @Optional() _parentForm: NgForm,
+    @Optional() _parentFormGroup: FormGroupDirective,
+    _defaultErrorStateMatcher: ErrorStateMatcher,
+    @Optional() @Self() @Inject(MAT_INPUT_VALUE_ACCESSOR) inputValueAccessor: any,
+    private _autofillMonitor: AutofillMonitor,
+    ngZone: NgZone) {
+
     super(_defaultErrorStateMatcher, _parentForm, _parentFormGroup, ngControl);
+
+    const element = this._elementRef.nativeElement;
+
     // If no input value accessor was explicitly specified, use the element as the input value
     // accessor.
-    this._inputValueAccessor = inputValueAccessor || this._elementRef.nativeElement;
+    this._inputValueAccessor = inputValueAccessor || element;
 
     this._previousNativeValue = this.value;
 
@@ -221,19 +250,37 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
     // key. In order to get around this we need to "jiggle" the caret loose. Since this bug only
     // exists on iOS, we only bother to install the listener on iOS.
     if (_platform.IOS) {
-      _elementRef.nativeElement.addEventListener('keyup', (event: Event) => {
-        let el = event.target as HTMLInputElement;
-        if (!el.value && !el.selectionStart && !el.selectionEnd) {
-          // Note: Just setting `0, 0` doesn't fix the issue. Setting `1, 1` fixes it for the first
-          // time that you type text and then hold delete. Toggling to `1, 1` and then back to
-          // `0, 0` seems to completely fix it.
-          el.setSelectionRange(1, 1);
-          el.setSelectionRange(0, 0);
-        }
+      ngZone.runOutsideAngular(() => {
+        _elementRef.nativeElement.addEventListener('keyup', (event: Event) => {
+          let el = event.target as HTMLInputElement;
+          if (!el.value && !el.selectionStart && !el.selectionEnd) {
+            // Note: Just setting `0, 0` doesn't fix the issue. Setting
+            // `1, 1` fixes it for the first time that you type text and
+            // then hold delete. Toggling to `1, 1` and then back to
+            // `0, 0` seems to completely fix it.
+            el.setSelectionRange(1, 1);
+            el.setSelectionRange(0, 0);
+          }
+        });
       });
     }
 
     this._isServer = !this._platform.isBrowser;
+    this._isNativeSelect = element.nodeName.toLowerCase() === 'select';
+
+    if (this._isNativeSelect) {
+      this.controlType = (element as HTMLSelectElement).multiple ? 'mat-native-select-multiple' :
+                                                                   'mat-native-select';
+    }
+  }
+
+  ngOnInit() {
+    if (this._platform.isBrowser) {
+      this._autofillMonitor.monitor(this._elementRef.nativeElement).subscribe(event => {
+        this.autofilled = event.isAutofilled;
+        this.stateChanges.next();
+      });
+    }
   }
 
   ngOnChanges() {
@@ -242,6 +289,10 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
 
   ngOnDestroy() {
     this.stateChanges.complete();
+
+    if (this._platform.isBrowser) {
+      this._autofillMonitor.stopMonitoring(this._elementRef.nativeElement);
+    }
   }
 
   ngDoCheck() {
@@ -259,11 +310,13 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
   }
 
   /** Focuses the input. */
-  focus(): void { this._elementRef.nativeElement.focus(); }
+  focus(): void {
+    this._elementRef.nativeElement.focus();
+  }
 
   /** Callback for the cases where the focused state of the input changes. */
   _focusChanged(isFocused: boolean) {
-    if (isFocused !== this.focused && !this.readonly) {
+    if (isFocused !== this.focused && (!this.readonly || !isFocused)) {
       this.focused = isFocused;
       this.stateChanges.next();
     }
@@ -281,7 +334,7 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
 
   /** Does some manual dirty checking on the native input `value` property. */
   protected _dirtyCheckNativeValue() {
-    const newValue = this.value;
+    const newValue = this._elementRef.nativeElement.value;
 
     if (this._previousNativeValue !== newValue) {
       this._previousNativeValue = newValue;
@@ -308,15 +361,9 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
     return validity && validity.badInput;
   }
 
-  /** Determines if the component host is a textarea. If not recognizable it returns false. */
+  /** Determines if the component host is a textarea. */
   protected _isTextarea() {
-    let nativeElement = this._elementRef.nativeElement;
-
-    // In Universal, we don't have access to `nodeName`, but the same can be achieved with `name`.
-    // Note that this shouldn't be necessary once Angular switches to an API that resembles the
-    // DOM closer.
-    let nodeName = this._platform.isBrowser ? nativeElement.nodeName : nativeElement.name;
-    return nodeName ? nodeName.toLowerCase() === 'textarea' : false;
+    return this._elementRef.nativeElement.nodeName.toLowerCase() === 'textarea';
   }
 
   /**
@@ -324,24 +371,49 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
    * @docs-private
    */
   get empty(): boolean {
-    return !this._isNeverEmpty() && !this._elementRef.nativeElement.value && !this._isBadInput();
+    return !this._isNeverEmpty() && !this._elementRef.nativeElement.value && !this._isBadInput() &&
+        !this.autofilled;
   }
 
   /**
    * Implemented as part of MatFormFieldControl.
    * @docs-private
    */
-  get shouldLabelFloat(): boolean { return this.focused || !this.empty; }
+  get shouldLabelFloat(): boolean {
+    if (this._isNativeSelect) {
+      // For a single-selection `<select>`, the label should float when the selected option has
+      // a non-empty display value. For a `<select multiple>`, the label *always* floats to avoid
+      // overlapping the label with the options.
+      const selectElement = this._elementRef.nativeElement as HTMLSelectElement;
+      const firstOption: HTMLOptionElement | undefined = selectElement.options[0];
+
+      // On most browsers the `selectedIndex` will always be 0, however on IE and Edge it'll be
+      // -1 if the `value` is set to something, that isn't in the list of options, at a later point.
+      return this.focused || selectElement.multiple || !this.empty ||
+             !!(selectElement.selectedIndex > -1 && firstOption && firstOption.label);
+    } else {
+      return this.focused || !this.empty;
+    }
+  }
 
   /**
    * Implemented as part of MatFormFieldControl.
    * @docs-private
    */
-  setDescribedByIds(ids: string[]) { this._ariaDescribedby = ids.join(' '); }
+  setDescribedByIds(ids: string[]) {
+    this._ariaDescribedby = ids.join(' ');
+  }
 
   /**
    * Implemented as part of MatFormFieldControl.
    * @docs-private
    */
-  onContainerClick() { this.focus(); }
+  onContainerClick() {
+    // Do not re-focus the input element if the element is already focused. Otherwise it can happen
+    // that someone clicks on a time input and the cursor resets to the "hours" field while the
+    // "minutes" field was actually clicked. See: https://github.com/angular/material2/issues/12849
+    if (!this.focused) {
+      this.focus();
+    }
+  }
 }

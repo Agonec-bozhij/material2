@@ -1,32 +1,42 @@
 package(default_visibility=["//visibility:public"])
-load("@angular//:index.bzl", "ng_module")
-load("@io_bazel_rules_sass//sass:sass.bzl", "sass_library", "sass_binary")
 
+load("@io_bazel_rules_sass//:defs.bzl", "sass_library", "sass_binary")
+load("//tools:defaults.bzl", "ng_module", "ng_test_library", "ng_web_test_suite",
+  "markdown_to_html")
 
 ng_module(
   name = "snack-bar",
   srcs = glob(["**/*.ts"], exclude=["**/*.spec.ts"]),
-  module_name = "@angular/material/snack_bar",
+  module_name = "@angular/material/snack-bar",
   assets = [
-    ":snack_bar_container_css",
-    "simple_snack_bar_css",
-  ],
+    ":snack-bar-container.css",
+    ":simple-snack-bar.css",
+  ] + glob(["**/*.html"]),
   deps = [
-    "//src/lib/core",
+    "@npm//@angular/animations",
+    "@npm//@angular/common",
+    "@npm//@angular/core",
+    "@npm//rxjs",
     "//src/cdk/a11y",
+    "//src/cdk/bidi",
     "//src/cdk/layout",
     "//src/cdk/overlay",
     "//src/cdk/portal",
-    "@rxjs",
+    "//src/lib/button",
+    "//src/lib/core",
   ],
-  tsconfig = ":tsconfig-build.json",
 )
 
+sass_library(
+  name = "snack_bar_scss_lib",
+  srcs = glob(["**/_*.scss"]),
+  deps = ["//src/lib/core:core_scss_lib"],
+)
 
 sass_binary(
   name = "snack_bar_container_scss",
   src = "snack-bar-container.scss",
-  deps = ["//src/lib/core:core_scss_lib"],
+  deps = ["//src/cdk/a11y:a11y_scss_lib"],
 )
 
 sass_binary(
@@ -35,20 +45,29 @@ sass_binary(
   deps = ["//src/lib/core:core_scss_lib"],
 )
 
-# TODO(jelbourn): remove this when sass_binary supports specifying an output filename and dir.
-# Copy the output of the sass_binary such that the filename and path match what we expect.
-genrule(
-  name = "snack_bar_container_css",
-  srcs = [":snack_bar_container_scss"],
-  outs = ["snack-bar-container.css"],
-  cmd = "cat $(locations :snack_bar_container_scss) > $@",
+ng_test_library(
+  name = "snack_bar_test_sources",
+  srcs = glob(["**/*.spec.ts"]),
+  deps = [
+    "@npm//@angular/common",
+    "@npm//@angular/platform-browser",
+    "//src/cdk/a11y",
+    "//src/cdk/overlay",
+    ":snack-bar",
+  ]
 )
 
-# TODO(jelbourn): remove this when sass_binary supports specifying an output filename and dir.
-# Copy the output of the sass_binary such that the filename and path match what we expect.
-genrule(
-  name = "simple_snack_bar_css",
-  srcs = [":simple_snack_bar_scss"],
-  outs = ["simple-snack-bar.css"],
-  cmd = "cat $(locations :simple_snack_bar_scss) > $@",
+ng_web_test_suite(
+  name = "unit_tests",
+  deps = [":snack_bar_test_sources"],
+)
+
+markdown_to_html(
+  name = "overview",
+  srcs = [":snack-bar.md"],
+)
+
+filegroup(
+  name = "source-files",
+  srcs = glob(["**/*.ts"]),
 )

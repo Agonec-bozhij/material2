@@ -7,11 +7,11 @@ import {
   wrappedErrorMessage
 } from '@angular/cdk/testing';
 import {Component, ElementRef, ViewChild} from '@angular/core';
-import {async, ComponentFixture, inject, TestBed} from '@angular/core/testing';
+import {async, ComponentFixture, fakeAsync, inject, TestBed, tick} from '@angular/core/testing';
 import {By} from '@angular/platform-browser';
 import {NoopAnimationsModule} from '@angular/platform-browser/animations';
-import {Observable} from 'rxjs/Observable';
-import {map} from 'rxjs/operators/map';
+import {Observable} from 'rxjs';
+import {map} from 'rxjs/operators';
 import {MatTableModule} from '../table/index';
 import {
   MatSort,
@@ -31,7 +31,6 @@ import {
 
 describe('MatSort', () => {
   let fixture: ComponentFixture<SimpleMatSortApp>;
-
   let component: SimpleMatSortApp;
 
   beforeEach(async(() => {
@@ -64,6 +63,14 @@ describe('MatSort', () => {
     fixture.destroy();
     expect(sortables.size).toBe(0);
   });
+
+  it('should mark itself as initialized', fakeAsync(() => {
+    let isMarkedInitialized = false;
+    component.matSort.initialized.subscribe(() => isMarkedInitialized = true);
+
+    tick();
+    expect(isMarkedInitialized).toBeTruthy();
+  }));
 
   it('should use the column definition if used within a cdk table', () => {
     let cdkTableMatSortAppFixture = TestBed.createComponent(CdkTableMatSortApp);
@@ -347,6 +354,23 @@ describe('MatSort', () => {
     expect(header._showIndicatorHint).toBeFalsy();
   });
 
+  it('should apply the aria-sort label to the header when sorted', () => {
+    const sortHeaderElement = fixture.nativeElement.querySelector('#defaultA');
+    expect(sortHeaderElement.getAttribute('aria-sort')).toBe(null);
+
+    component.sort('defaultA');
+    fixture.detectChanges();
+    expect(sortHeaderElement.getAttribute('aria-sort')).toBe('ascending');
+
+    component.sort('defaultA');
+    fixture.detectChanges();
+    expect(sortHeaderElement.getAttribute('aria-sort')).toBe('descending');
+
+    component.sort('defaultA');
+    fixture.detectChanges();
+    expect(sortHeaderElement.getAttribute('aria-sort')).toBe(null);
+  });
+
   it('should re-render when the i18n labels have changed',
     inject([MatSortHeaderIntl], (intl: MatSortHeaderIntl) => {
       const header = fixture.debugElement.query(By.directive(MatSortHeader)).nativeElement;
@@ -359,6 +383,32 @@ describe('MatSort', () => {
       expect(button.getAttribute('aria-label')).toBe('Sort all of the things');
     })
   );
+
+  it('should not render the arrow if sorting is disabled for that column', fakeAsync(() => {
+    const sortHeaderElement = fixture.nativeElement.querySelector('#defaultA');
+
+    // Switch sorting to a different column before asserting.
+    component.sort('defaultB');
+    fixture.componentInstance.disabledColumnSort = true;
+    fixture.detectChanges();
+    tick();
+    fixture.detectChanges();
+
+    expect(sortHeaderElement.querySelector('.mat-sort-header-arrow')).toBeFalsy();
+  }));
+
+  it('should render the arrow if a disabled column is being sorted by', fakeAsync(() => {
+    const sortHeaderElement = fixture.nativeElement.querySelector('#defaultA');
+
+    component.sort('defaultA');
+    fixture.componentInstance.disabledColumnSort = true;
+    fixture.detectChanges();
+    tick();
+    fixture.detectChanges();
+
+    expect(sortHeaderElement.querySelector('.mat-sort-header-arrow')).toBeTruthy();
+  }));
+
 });
 
 /**
@@ -443,20 +493,20 @@ class SimpleMatSortApp {
   disabledColumnSort = false;
   disableAllSort = false;
 
-  @ViewChild(MatSort) matSort: MatSort;
-  @ViewChild('defaultA') defaultA: MatSortHeader;
-  @ViewChild('defaultB') defaultB: MatSortHeader;
-  @ViewChild('overrideStart') overrideStart: MatSortHeader;
-  @ViewChild('overrideDisableClear') overrideDisableClear: MatSortHeader;
+  @ViewChild(MatSort, {static: false}) matSort: MatSort;
+  @ViewChild('defaultA', {static: false}) defaultA: MatSortHeader;
+  @ViewChild('defaultB', {static: false}) defaultB: MatSortHeader;
+  @ViewChild('overrideStart', {static: false}) overrideStart: MatSortHeader;
+  @ViewChild('overrideDisableClear', {static: false}) overrideDisableClear: MatSortHeader;
 
-  constructor (public elementRef: ElementRef) { }
+  constructor (public elementRef: ElementRef<HTMLElement>) { }
 
   sort(id: SimpleMatSortAppColumnIds) {
     this.dispatchMouseEvent(id, 'click');
   }
 
   dispatchMouseEvent(id: SimpleMatSortAppColumnIds, event: string) {
-    const sortElement = this.elementRef.nativeElement.querySelector(`#${id}`);
+    const sortElement = this.elementRef.nativeElement.querySelector(`#${id}`)!;
     dispatchMouseEvent(sortElement, event);
   }
 
@@ -513,7 +563,7 @@ class FakeDataSource extends DataSource<any> {
   `
 })
 class CdkTableMatSortApp {
-  @ViewChild(MatSort) matSort: MatSort;
+  @ViewChild(MatSort, {static: false}) matSort: MatSort;
 
   dataSource = new FakeDataSource();
   columnsToRender = ['column_a', 'column_b', 'column_c'];
@@ -543,7 +593,7 @@ class CdkTableMatSortApp {
   `
 })
 class MatTableMatSortApp {
-  @ViewChild(MatSort) matSort: MatSort;
+  @ViewChild(MatSort, {static: false}) matSort: MatSort;
 
   dataSource = new FakeDataSource();
   columnsToRender = ['column_a', 'column_b', 'column_c'];

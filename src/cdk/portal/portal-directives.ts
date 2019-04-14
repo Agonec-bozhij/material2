@@ -7,20 +7,19 @@
  */
 
 import {
-  NgModule,
+  ComponentFactoryResolver,
   ComponentRef,
   Directive,
   EmbeddedViewRef,
-  TemplateRef,
-  ComponentFactoryResolver,
-  ViewContainerRef,
+  EventEmitter,
+  NgModule,
   OnDestroy,
   OnInit,
-  Input,
-  EventEmitter,
   Output,
+  TemplateRef,
+  ViewContainerRef,
 } from '@angular/core';
-import {Portal, TemplatePortal, ComponentPortal, BasePortalOutlet} from './portal';
+import {BasePortalOutlet, ComponentPortal, Portal, TemplatePortal} from './portal';
 
 
 /**
@@ -68,22 +67,6 @@ export class CdkPortalOutlet extends BasePortalOutlet implements OnInit, OnDestr
     super();
   }
 
-  /**
-   * @deprecated
-   * @deletion-target 6.0.0
-   */
-  @Input('portalHost')
-  get _deprecatedPortal() { return this.portal; }
-  set _deprecatedPortal(v) { this.portal = v; }
-
-  /**
-   * @deprecated
-   * @deletion-target 6.0.0
-   */
-  @Input('cdkPortalHost')
-  get _deprecatedPortalHost() { return this.portal; }
-  set _deprecatedPortalHost(v) { this.portal = v; }
-
   /** Portal associated with the Portal outlet. */
   get portal(): Portal<any> | null {
     return this._attachedPortal;
@@ -109,7 +92,8 @@ export class CdkPortalOutlet extends BasePortalOutlet implements OnInit, OnDestr
     this._attachedPortal = portal;
   }
 
-  @Output('attached') attached: EventEmitter<CdkPortalOutletAttachedRef> =
+  /** Emits when a portal is attached to the outlet. */
+  @Output() attached: EventEmitter<CdkPortalOutletAttachedRef> =
       new EventEmitter<CdkPortalOutletAttachedRef>();
 
   /** Component or view reference that is attached to the portal. */
@@ -142,11 +126,11 @@ export class CdkPortalOutlet extends BasePortalOutlet implements OnInit, OnDestr
         portal.viewContainerRef :
         this._viewContainerRef;
 
-    const componentFactory =
-        this._componentFactoryResolver.resolveComponentFactory(portal.component);
+    const resolver = portal.componentFactoryResolver || this._componentFactoryResolver;
+    const componentFactory = resolver.resolveComponentFactory(portal.component);
     const ref = viewContainerRef.createComponent(
         componentFactory, viewContainerRef.length,
-        portal.injector || viewContainerRef.parentInjector);
+        portal.injector || viewContainerRef.injector);
 
     super.setDisposeFn(() => ref.destroy());
     this._attachedPortal = portal;

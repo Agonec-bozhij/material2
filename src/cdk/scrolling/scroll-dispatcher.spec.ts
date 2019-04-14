@@ -1,9 +1,9 @@
 import {inject, TestBed, async, fakeAsync, ComponentFixture, tick} from '@angular/core/testing';
 import {NgModule, Component, ViewChild, ElementRef} from '@angular/core';
-import {CdkScrollable, ScrollDispatcher, ScrollDispatchModule} from './public-api';
+import {CdkScrollable, ScrollDispatcher, ScrollingModule} from './public-api';
 import {dispatchFakeEvent} from '@angular/cdk/testing';
 
-describe('Scroll Dispatcher', () => {
+describe('ScrollDispatcher', () => {
 
   beforeEach(async(() => {
     TestBed.configureTestingModule({
@@ -90,12 +90,51 @@ describe('Scroll Dispatcher', () => {
 
       expect(spy).toHaveBeenCalledTimes(1);
     });
+
+    it('should complete the `scrolled` stream on destroy', () => {
+      const completeSpy = jasmine.createSpy('complete spy');
+      const subscription = scroll.scrolled(0).subscribe(undefined, undefined, completeSpy);
+
+      scroll.ngOnDestroy();
+
+      expect(completeSpy).toHaveBeenCalled();
+
+      subscription.unsubscribe();
+    });
+
+    it('should complete the scrollable stream when it is destroyed', () => {
+      const scrollable = fixture.componentInstance.scrollable;
+      const spy = jasmine.createSpy('complete spy');
+      const subscription = scrollable.elementScrolled().subscribe(undefined, undefined, spy);
+
+      fixture.destroy();
+      expect(spy).toHaveBeenCalled();
+      subscription.unsubscribe();
+    });
+
+    it('should not register the same scrollable twice', () => {
+      const scrollable = fixture.componentInstance.scrollable;
+      const scrollSpy = jasmine.createSpy('scroll spy');
+      const scrollSubscription = scroll.scrolled(0).subscribe(scrollSpy);
+
+      expect(scroll.scrollContainers.has(scrollable)).toBe(true);
+
+      scroll.register(scrollable);
+      scroll.deregister(scrollable);
+
+      dispatchFakeEvent(fixture.componentInstance.scrollingElement.nativeElement, 'scroll');
+      fixture.detectChanges();
+
+      expect(scrollSpy).not.toHaveBeenCalled();
+      scrollSubscription.unsubscribe();
+    });
+
   });
 
   describe('Nested scrollables', () => {
     let scroll: ScrollDispatcher;
     let fixture: ComponentFixture<NestedScrollingComponent>;
-    let element: ElementRef;
+    let element: ElementRef<HTMLElement>;
 
     beforeEach(inject([ScrollDispatcher], (s: ScrollDispatcher) => {
       scroll = s;
@@ -205,8 +244,8 @@ describe('Scroll Dispatcher', () => {
   template: `<div #scrollingElement cdk-scrollable style="height: 9999px"></div>`
 })
 class ScrollingComponent {
-  @ViewChild(CdkScrollable) scrollable: CdkScrollable;
-  @ViewChild('scrollingElement') scrollingElement: ElementRef;
+  @ViewChild(CdkScrollable, {static: false}) scrollable: CdkScrollable;
+  @ViewChild('scrollingElement', {static: false}) scrollingElement: ElementRef<HTMLElement>;
 }
 
 
@@ -223,12 +262,12 @@ class ScrollingComponent {
   `
 })
 class NestedScrollingComponent {
-  @ViewChild('interestingElement') interestingElement: ElementRef;
+  @ViewChild('interestingElement', {static: false}) interestingElement: ElementRef<HTMLElement>;
 }
 
 const TEST_COMPONENTS = [ScrollingComponent, NestedScrollingComponent];
 @NgModule({
-  imports: [ScrollDispatchModule],
+  imports: [ScrollingModule],
   providers: [ScrollDispatcher],
   exports: TEST_COMPONENTS,
   declarations: TEST_COMPONENTS,

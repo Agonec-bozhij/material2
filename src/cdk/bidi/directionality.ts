@@ -6,35 +6,19 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {
-  EventEmitter,
-  Injectable,
-  Optional,
-  Inject,
-  InjectionToken,
-} from '@angular/core';
+import {EventEmitter, Inject, Injectable, Optional, OnDestroy} from '@angular/core';
+import {DIR_DOCUMENT} from './dir-document-token';
 
 
 export type Direction = 'ltr' | 'rtl';
 
-/**
- * Injection token used to inject the document into Directionality.
- * This is used so that the value can be faked in tests.
- *
- * We can't use the real document in tests because changing the real `dir` causes geometry-based
- * tests in Safari to fail.
- *
- * We also can't re-provide the DOCUMENT token from platform-brower because the unit tests
- * themselves use things like `querySelector` in test code.
- */
-export const DIR_DOCUMENT = new InjectionToken<Document>('cdk-dir-doc');
 
 /**
  * The directionality (LTR / RTL) context for the application (or a subtree of it).
  * Exposes the current direction and a stream of direction changes.
  */
-@Injectable()
-export class Directionality {
+@Injectable({providedIn: 'root'})
+export class Directionality implements OnDestroy {
   /** The current 'ltr' or 'rtl' value. */
   readonly value: Direction = 'ltr';
 
@@ -49,7 +33,12 @@ export class Directionality {
       // but getComputedStyle return either "ltr" or "rtl". avoiding getComputedStyle for now
       const bodyDir = _document.body ? _document.body.dir : null;
       const htmlDir = _document.documentElement ? _document.documentElement.dir : null;
-      this.value = (bodyDir || htmlDir || 'ltr') as Direction;
+      const value = bodyDir || htmlDir;
+      this.value = (value === 'ltr' || value === 'rtl') ? value : 'ltr';
     }
+  }
+
+  ngOnDestroy() {
+    this.change.complete();
   }
 }

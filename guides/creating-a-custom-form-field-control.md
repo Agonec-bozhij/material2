@@ -1,3 +1,5 @@
+# Creating a custom form field control
+
 It is possible to create custom form field controls that can be used inside `<mat-form-field>`. This
 can be useful if you need to create a component that shares a lot of common behavior with a form
 field, but adds some additional logic.
@@ -19,7 +21,7 @@ class MyTel {
 }
 
 @Component({
-  selector: 'my-tel-input',
+  selector: 'example-tel-input',
   template: `
     <div [formGroup]="parts">
       <input class="area" formControlName="area" size="3">
@@ -132,7 +134,7 @@ element and just generate a unique ID for it.
 ```ts
 static nextId = 0;
 
-@HostBinding() id = `my-tel-input-${MyTelInput.nextId++}`;
+@HostBinding() id = `example-tel-input-${MyTelInput.nextId++}`;
 ```
 
 #### `placeholder`
@@ -157,22 +159,67 @@ private _placeholder: string;
 
 #### `ngControl`
 
-This property allows the form field control to specify the `@angular/forms` control that is bound to
-this component. Since we haven't set up our component to act as a `ControlValueAccessor`, we'll just
-set this to `null` in our component. In any real component, you would probably want to implement
-`ControlValueAccessor` so that your component can work with `formControl` and `ngModel`.
+This property allows the form field control to specify the `@angular/forms` control that is bound
+to this component. Since we haven't set up our component to act as a `ControlValueAccessor`, we'll
+just set this to `null` in our component.
 
 ```ts
-ngControl = null;
+ngControl: NgControl = null;
 ```
 
-If you did implement `ControlValueAccessor`, you could simply inject the `NgControl` and make it
-publicly available. (For additional information about `ControlValueAccessor` see the
-[API docs](https://angular.io/api/forms/ControlValueAccessor).)
+It is likely you will want to implement `ControlValueAccessor` so that your component can work with
+`formControl` and `ngModel`. If you do implement `ControlValueAccessor` you will need to get a
+reference to the `NgControl` associated with your control and make it publicly available.
+
+The easy way is to add it as a public property to your constructor and let dependency injection
+handle it:
 
 ```ts
-constructor(..., @Optional() @Self() public ngControl: NgControl) { ... }
+constructor(
+  ...,
+  @Optional() @Self() public ngControl: NgControl,
+  ...,
+) { }
 ```
+
+Note that if your component implements `ControlValueAccessor`, it may already be set up to provide
+`NG_VALUE_ACCESSOR` (in the `providers` part of the component's decorator, or possibly in a module
+declaration). If so you may get a *cannot instantiate cyclic dependency* error.
+
+To resolve this, remove the `NG_VALUE_ACCESSOR` provider and instead set the value accessor directly:
+
+```ts
+@Component({
+  ...,
+  providers: [
+    ...,
+    // Remove this.
+    // {
+    //   provide: NG_VALUE_ACCESSOR,
+    //   useExisting: forwardRef(() => MatFormFieldControl),
+    //   multi: true,
+    // },
+  ],
+})
+class MyTelInput implements MatFormFieldControl<MyTel> {
+  constructor(
+    ...,
+    @Optional() @Self() public ngControl: NgControl,
+    ...,
+  ) {
+
+    // Replace the provider from above with this.
+    if (this.ngControl != null) {
+      // Setting the value accessor directly (instead of using
+      // the providers) to avoid running into a circular import.
+      this.ngControl.valueAccessor = this;
+    }
+  }
+}
+```
+
+For additional information about `ControlValueAccessor` see the [API docs](https://angular.io/api/forms/ControlValueAccessor).
+
 
 #### `focused`
 
@@ -185,7 +232,7 @@ need to remember to emit on the `stateChanges` stream so change detection can ha
 ```ts
 focused = false;
 
-constructor(fb: FormBuilder, private fm: FocusMonitor, private elRef: ElementRef) {
+constructor(fb: FormBuilder, private fm: FocusMonitor, private elRef: ElementRef<HTMLElement>) {
   ...
   fm.monitor(elRef.nativeElement, true).subscribe(origin => {
     this.focused = !!origin;
@@ -260,21 +307,13 @@ make up our component.
 
 ```ts
 @Input()
-get disabled() {
-  return this._disabled;
-}
-set disabled(dis) {
-  this._disabled = coerceBooleanProperty(dis);
+get disabled(): boolean { return this._disabled; }
+set disabled(value: boolean) {
+  this._disabled = coerceBooleanProperty(value);
+  this._disabled ? this.parts.disable() : this.parts.enable();
   this.stateChanges.next();
 }
 private _disabled = false;
-```
-```html
-<input class="area" formControlName="area" size="3" [disabled]="disabled">
-<span>&ndash;</span>
-<input class="exchange" formControlName="exchange" size="3" [disabled]="disabled">
-<span>&ndash;</span>
-<input class="subscriber" formControlName="subscriber" size="4" [disabled]="disabled">
 ```
 
 #### `errorState`
@@ -291,11 +330,11 @@ errorState = false;
 This property allows us to specify a unique string for the type of control in form field. The
 `<mat-form-field>` will add an additional class based on this type that can be used to easily apply
 special styles to a `<mat-form-field>` that contains a specific type of control. In this example
-we'll use `my-tel-input` as our control type which will result in the form field adding the class
-`mat-form-field-my-tel-input`.
+we'll use `example-tel-input` as our control type which will result in the form field adding the
+class `mat-form-field-example-tel-input`.
 
 ```ts
-controlType = 'my-tel-input';
+controlType = 'example-tel-input';
 ```
 
 #### `setDescribedByIds(ids: string[])`
@@ -334,7 +373,7 @@ do is place it inside of a `<mat-form-field>`
 
 ```html
 <mat-form-field>
-  <my-tel-input></my-tel-input>
+  <example-tel-input></example-tel-input>
 </mat-form-field>
 ```
 
@@ -344,7 +383,7 @@ the error state).
 
 ```html
 <mat-form-field>
-  <my-tel-input placeholder="Phone number" required></my-tel-input>
+  <example-tel-input placeholder="Phone number" required></example-tel-input>
   <mat-icon matPrefix>phone</mat-icon>
   <mat-hint>Include area code</mat-hint>
 </mat-form-field>

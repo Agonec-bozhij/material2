@@ -8,7 +8,7 @@
   $background: map-get($theme, background);
   $foreground: map-get($theme, foreground);
 
-  .mat-list, .mat-nav-list, .mat-selection-list {
+  .mat-list-base {
     .mat-list-item {
       color: mat-color($foreground, text);
     }
@@ -26,18 +26,10 @@
     background-color: mat-color($background, disabled-list-option);
   }
 
-  .mat-nav-list .mat-list-item {
-    outline: none;
-
-    &:hover, &.mat-list-item-focus {
-      background: mat-color($background, 'hover');
-    }
-  }
-
-  .mat-list-option {
-    outline: none;
-
-    &:hover, &.mat-list-item-focus {
+  .mat-list-option,
+  .mat-nav-list .mat-list-item,
+  .mat-action-list .mat-list-item {
+    &:hover, &:focus {
       background: mat-color($background, 'hover');
     }
   }
@@ -55,7 +47,7 @@
   }
 
   // Default list
-  .mat-list, .mat-nav-list, .mat-selection-list {
+  .mat-list-base {
     .mat-list-item {
       font-size: mat-font-size($config, subheading-2);
       @include mat-line-base(mat-font-size($config, body-1));
@@ -74,7 +66,7 @@
   }
 
   // Dense list
-  .mat-list[dense], .mat-nav-list[dense], .mat-selection-list[dense] {
+  .mat-list-base[dense] {
     .mat-list-item {
       font-size: mat-font-size($config, caption);
       @include mat-line-base(mat-font-size($config, caption));

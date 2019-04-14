@@ -6,26 +6,20 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {catchError} from 'rxjs/operators/catchError';
-import {tap} from 'rxjs/operators/tap';
-import {finalize} from 'rxjs/operators/finalize';
-import {map} from 'rxjs/operators/map';
-import {share} from 'rxjs/operators/share';
+import {DOCUMENT} from '@angular/common';
+import {HttpClient, HttpErrorResponse} from '@angular/common/http';
 import {
-  Injectable,
   Inject,
+  Injectable,
   InjectionToken,
   Optional,
   SecurityContext,
   SkipSelf,
+  OnDestroy,
 } from '@angular/core';
-import {HttpClient} from '@angular/common/http';
-import {DomSanitizer, SafeResourceUrl} from '@angular/platform-browser';
-import {Observable} from 'rxjs/Observable';
-import {forkJoin} from 'rxjs/observable/forkJoin';
-import {of as observableOf} from 'rxjs/observable/of';
-import {_throw as observableThrow} from 'rxjs/observable/throw';
-import {DOCUMENT} from '@angular/common';
+import {DomSanitizer, SafeResourceUrl, SafeHtml} from '@angular/platform-browser';
+import {forkJoin, Observable, of as observableOf, throwError as observableThrow} from 'rxjs';
+import {catchError, finalize, map, share, tap} from 'rxjs/operators';
 
 
 /**
@@ -40,7 +34,7 @@ export function getMatIconNameNotFoundError(iconName: string): Error {
 
 /**
  * Returns an exception to be thrown when the consumer attempts to use
- * `<mat-icon>` without including @angular/http.
+ * `<mat-icon>` without including @angular/common/http.
  * @docs-private
  */
 export function getMatIconNoHttpProviderError(): Error {
@@ -55,18 +49,41 @@ export function getMatIconNoHttpProviderError(): Error {
  * @param url URL that was attempted to be sanitized.
  * @docs-private
  */
-export function getMatIconFailedToSanitizeError(url: SafeResourceUrl): Error {
+export function getMatIconFailedToSanitizeUrlError(url: SafeResourceUrl): Error {
   return Error(`The URL provided to MatIconRegistry was not trusted as a resource URL ` +
                `via Angular's DomSanitizer. Attempted URL was "${url}".`);
 }
+
+/**
+ * Returns an exception to be thrown when a HTML string couldn't be sanitized.
+ * @param literal HTML that was attempted to be sanitized.
+ * @docs-private
+ */
+export function getMatIconFailedToSanitizeLiteralError(literal: SafeHtml): Error {
+  return Error(`The literal provided to MatIconRegistry was not trusted as safe HTML by ` +
+               `Angular's DomSanitizer. Attempted literal was "${literal}".`);
+}
+
 
 /**
  * Configuration for an icon, including the URL and possibly the cached SVG element.
  * @docs-private
  */
 class SvgIconConfig {
-  svgElement: SVGElement | null = null;
-  constructor(public url: SafeResourceUrl) { }
+  url: SafeResourceUrl | null;
+  svgElement: SVGElement | null;
+
+  constructor(url: SafeResourceUrl);
+  constructor(svgElement: SVGElement);
+  constructor(data: SafeResourceUrl | SVGElement) {
+    // Note that we can't use `instanceof SVGElement` here,
+    // because it'll break during server-side rendering.
+    if (!!(data as any).nodeName) {
+      this.svgElement = data as SVGElement;
+    } else {
+      this.url = data as SafeResourceUrl;
+    }
+  }
 }
 
 /**
@@ -76,8 +93,8 @@ class SvgIconConfig {
  * - Registers aliases for CSS classes, for use with icon fonts.
  * - Loads icons from URLs and extracts individual icons from icon sets.
  */
-@Injectable()
-export class MatIconRegistry {
+@Injectable({providedIn: 'root'})
+export class MatIconRegistry implements OnDestroy {
   private _document: Document;
 
   /**
@@ -110,8 +127,7 @@ export class MatIconRegistry {
   constructor(
     @Optional() private _httpClient: HttpClient,
     private _sanitizer: DomSanitizer,
-    @Optional() @Inject(DOCUMENT) document?: any) {
-      // TODO(crisbeto): make _document required next major release.
+    @Optional() @Inject(DOCUMENT) document: any) {
       this._document = document;
     }
 
@@ -125,15 +141,39 @@ export class MatIconRegistry {
   }
 
   /**
+   * Registers an icon using an HTML string in the default namespace.
+   * @param iconName Name under which the icon should be registered.
+   * @param literal SVG source of the icon.
+   */
+  addSvgIconLiteral(iconName: string, literal: SafeHtml): this {
+    return this.addSvgIconLiteralInNamespace('', iconName, literal);
+  }
+
+  /**
    * Registers an icon by URL in the specified namespace.
    * @param namespace Namespace in which the icon should be registered.
    * @param iconName Name under which the icon should be registered.
    * @param url
    */
   addSvgIconInNamespace(namespace: string, iconName: string, url: SafeResourceUrl): this {
-    const key = iconKey(namespace, iconName);
-    this._svgIconConfigs.set(key, new SvgIconConfig(url));
-    return this;
+    return this._addSvgIconConfig(namespace, iconName, new SvgIconConfig(url));
+  }
+
+  /**
+   * Registers an icon using an HTML string in the specified namespace.
+   * @param namespace Namespace in which the icon should be registered.
+   * @param iconName Name under which the icon should be registered.
+   * @param literal SVG source of the icon.
+   */
+  addSvgIconLiteralInNamespace(namespace: string, iconName: string, literal: SafeHtml): this {
+    const sanitizedLiteral = this._sanitizer.sanitize(SecurityContext.HTML, literal);
+
+    if (!sanitizedLiteral) {
+      throw getMatIconFailedToSanitizeLiteralError(literal);
+    }
+
+    const svgElement = this._createSvgElementForSingleIcon(sanitizedLiteral);
+    return this._addSvgIconConfig(namespace, iconName, new SvgIconConfig(svgElement));
   }
 
   /**
@@ -145,20 +185,36 @@ export class MatIconRegistry {
   }
 
   /**
+   * Registers an icon set using an HTML string in the default namespace.
+   * @param literal SVG source of the icon set.
+   */
+  addSvgIconSetLiteral(literal: SafeHtml): this {
+    return this.addSvgIconSetLiteralInNamespace('', literal);
+  }
+
+  /**
    * Registers an icon set by URL in the specified namespace.
    * @param namespace Namespace in which to register the icon set.
    * @param url
    */
   addSvgIconSetInNamespace(namespace: string, url: SafeResourceUrl): this {
-    const config = new SvgIconConfig(url);
-    const configNamespace = this._iconSetConfigs.get(namespace);
+    return this._addSvgIconSetConfig(namespace, new SvgIconConfig(url));
+  }
 
-    if (configNamespace) {
-      configNamespace.push(config);
-    } else {
-      this._iconSetConfigs.set(namespace, [config]);
+  /**
+   * Registers an icon set using an HTML string in the specified namespace.
+   * @param namespace Namespace in which to register the icon set.
+   * @param literal SVG source of the icon set.
+   */
+  addSvgIconSetLiteralInNamespace(namespace: string, literal: SafeHtml): this {
+    const sanitizedLiteral = this._sanitizer.sanitize(SecurityContext.HTML, literal);
+
+    if (!sanitizedLiteral) {
+      throw getMatIconFailedToSanitizeLiteralError(literal);
     }
-    return this;
+
+    const svgElement = this._svgElementFromString(sanitizedLiteral);
+    return this._addSvgIconSetConfig(namespace, new SvgIconConfig(svgElement));
   }
 
   /**
@@ -210,13 +266,13 @@ export class MatIconRegistry {
    * @param safeUrl URL from which to fetch the SVG icon.
    */
   getSvgIconFromUrl(safeUrl: SafeResourceUrl): Observable<SVGElement> {
-    let url = this._sanitizer.sanitize(SecurityContext.RESOURCE_URL, safeUrl);
+    const url = this._sanitizer.sanitize(SecurityContext.RESOURCE_URL, safeUrl);
 
     if (!url) {
-      throw getMatIconFailedToSanitizeError(safeUrl);
+      throw getMatIconFailedToSanitizeUrlError(safeUrl);
     }
 
-    let cachedIcon = this._cachedIconsByUrl.get(url);
+    const cachedIcon = this._cachedIconsByUrl.get(url);
 
     if (cachedIcon) {
       return observableOf(cloneSvg(cachedIcon));
@@ -253,6 +309,12 @@ export class MatIconRegistry {
     }
 
     return observableThrow(getMatIconNameNotFoundError(key));
+  }
+
+  ngOnDestroy() {
+   this._svgIconConfigs.clear();
+   this._iconSetConfigs.clear();
+   this._cachedIconsByUrl.clear();
   }
 
   /**
@@ -298,12 +360,12 @@ export class MatIconRegistry {
       .filter(iconSetConfig => !iconSetConfig.svgElement)
       .map(iconSetConfig => {
         return this._loadSvgIconSetFromConfig(iconSetConfig).pipe(
-          catchError((err: any): Observable<SVGElement | null> => {
-            let url = this._sanitizer.sanitize(SecurityContext.RESOURCE_URL, iconSetConfig.url);
+          catchError((err: HttpErrorResponse): Observable<SVGElement | null> => {
+            const url = this._sanitizer.sanitize(SecurityContext.RESOURCE_URL, iconSetConfig.url);
 
-            // Swallow errors fetching individual URLs so the combined Observable won't
-            // necessarily fail.
-            console.log(`Loading icon set URL: ${url} failed: ${err}`);
+            // Swallow errors fetching individual URLs so the
+            // combined Observable won't necessarily fail.
+            console.error(`Loading icon set URL: ${url} failed: ${err.message}`);
             return observableOf(null);
           })
         );
@@ -396,7 +458,7 @@ export class MatIconRegistry {
     // Clone the element and remove the ID to prevent multiple elements from being added
     // to the page with the same ID.
     const iconElement = iconSource.cloneNode(true) as Element;
-    iconElement.id = '';
+    iconElement.removeAttribute('id');
 
     // If the icon node is itself an <svg> node, clone and return it directly. If not, set it as
     // the content of a new <svg> node.
@@ -427,17 +489,15 @@ export class MatIconRegistry {
    * Creates a DOM element from the given SVG string.
    */
   private _svgElementFromString(str: string): SVGElement {
-    if (this._document || typeof document !== 'undefined') {
-      const div = (this._document || document).createElement('DIV');
-      div.innerHTML = str;
-      const svg = div.querySelector('svg') as SVGElement;
-      if (!svg) {
-        throw Error('<svg> tag not found');
-      }
-      return svg;
+    const div = this._document.createElement('DIV');
+    div.innerHTML = str;
+    const svg = div.querySelector('svg') as SVGElement;
+
+    if (!svg) {
+      throw Error('<svg> tag not found');
     }
 
-    throw new Error('MatIconRegistry could not resolve document.');
+    return svg;
   }
 
   /**
@@ -459,9 +519,6 @@ export class MatIconRegistry {
    * Sets the default attributes for an SVG element to be used as an icon.
    */
   private _setSvgAttributes(svg: SVGElement): SVGElement {
-    if (!svg.getAttribute('xmlns')) {
-      svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    }
     svg.setAttribute('fit', '');
     svg.setAttribute('height', '100%');
     svg.setAttribute('width', '100%');
@@ -474,15 +531,19 @@ export class MatIconRegistry {
    * Returns an Observable which produces the string contents of the given URL. Results may be
    * cached, so future calls with the same URL may not cause another HTTP request.
    */
-  private _fetchUrl(safeUrl: SafeResourceUrl): Observable<string> {
+  private _fetchUrl(safeUrl: SafeResourceUrl | null): Observable<string> {
     if (!this._httpClient) {
       throw getMatIconNoHttpProviderError();
+    }
+
+    if (safeUrl == null) {
+      throw Error(`Cannot fetch icon from URL "${safeUrl}".`);
     }
 
     const url = this._sanitizer.sanitize(SecurityContext.RESOURCE_URL, safeUrl);
 
     if (!url) {
-      throw getMatIconFailedToSanitizeError(safeUrl);
+      throw getMatIconFailedToSanitizeUrlError(safeUrl);
     }
 
     // Store in-progress fetches to avoid sending a duplicate request for a URL when there is
@@ -494,7 +555,7 @@ export class MatIconRegistry {
       return inProgressFetch;
     }
 
-    // TODO(jelbourn): for some reason, the `finally` operator "loses" the generic type on the
+    // TODO(jelbourn): for some reason, the `finalize` operator "loses" the generic type on the
     // Observable. Figure out why and fix it.
     const req = this._httpClient.get(url, {responseType: 'text'}).pipe(
       finalize(() => this._inProgressUrlFetches.delete(url)),
@@ -503,6 +564,34 @@ export class MatIconRegistry {
 
     this._inProgressUrlFetches.set(url, req);
     return req;
+  }
+
+  /**
+   * Registers an icon config by name in the specified namespace.
+   * @param namespace Namespace in which to register the icon config.
+   * @param iconName Name under which to register the config.
+   * @param config Config to be registered.
+   */
+  private _addSvgIconConfig(namespace: string, iconName: string, config: SvgIconConfig): this {
+    this._svgIconConfigs.set(iconKey(namespace, iconName), config);
+    return this;
+  }
+
+  /**
+   * Registers an icon set config in the specified namespace.
+   * @param namespace Namespace in which to register the icon config.
+   * @param config Config to be registered.
+   */
+  private _addSvgIconSetConfig(namespace: string, config: SvgIconConfig): this {
+    const configNamespace = this._iconSetConfigs.get(namespace);
+
+    if (configNamespace) {
+      configNamespace.push(config);
+    } else {
+      this._iconSetConfigs.set(namespace, [config]);
+    }
+
+    return this;
   }
 }
 

@@ -11,6 +11,7 @@
 
   <!-- Disable animations while a current animation is running -->
   <div class="mat-sort-header-arrow"
+       *ngIf="_renderArrow()"
        [@arrowOpacity]="_getArrowViewState()"
        [@arrowPosition]="_getArrowViewState()"
        [@allowChildren]="_getArrowDirectionState()"
@@ -24,7 +25,3 @@
     </div>
   </div>
 </div>
-
-<span class="cdk-visually-hidden" *ngIf="_isSorted()">
-  &nbsp;{{_intl.sortDescriptionLabel(id, _sort.direction)}}
-</span>
